@@ -1,114 +1,61 @@
 import json
 import os
 import re
-import urllib.error
-import urllib.request
+import urllib.error # Send requests to websites
+import urllib.request # handle error 
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv # Get enviroment variable from .env
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
 from backend.database_logic import (
-    add_user,
     authenticate_user,
     bootstrap_database,
     create_category,
     delete_document_by_id,
-    delete_user_by_id,
     get_document_by_id,
+    get_documents,
     get_documents_by_category,
-    get_user_by_id,
     list_audit_logs,
-    list_categories,
-    list_users,
+    get_access_label,
     log_audit,
-    update_user,
     save_text_document,
+    get_allowed_categories,
+    call_local_model,
 )
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key')
+# app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key')
 
-OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma2:2b')
+app.secret_key = os.getenv('SECRET_KEY', 'a-very-long-and-random-fallback-key')
+
 PAGE_SIZE = 10
-
-ROLE_ACCESS = {
-    'admin': ['procurement', 'governance', 'important', 'general'],
-    'auditor': ['governance', 'important'],
-    'user': ['procurement'],
-}
-
-ROLE_LABELS = {
-    'admin': 'All categories',
-    'auditor': 'Governance and important',
-    'user': 'Procurement only',
-}
-
 
 bootstrap_database()
 
-
+# Tries to grab the username from the current browser session. 
+# If the user isn't logged in, it defaults to 'guest'
 def current_username():
     return session.get('username', 'guest')
 
-
+# Grab the role (admin, auditor, user)
 def current_role():
     return session.get('role')
 
-
+# Check if the current role is admin
 def is_admin():
     return current_role() == 'admin'
 
-
+# Log msg
 def flash_message(message, category='info'):
     flash(message, category)
 
-
+# Data cleaning
+# lowercase and removing empty value
 def parse_categories(values):
     return [value.strip().lower() for value in values if value.strip()]
-
-
-def current_allowed_categories():
-    raw_categories = session.get('allowed_categories', '')
-    if isinstance(raw_categories, list):
-        return [value.strip().lower() for value in raw_categories if value.strip()]
-    if not raw_categories:
-        return []
-    return [value.strip().lower() for value in str(raw_categories).split(',') if value.strip()]
-
-
-def get_allowed_categories(role):
-    if role == 'admin':
-        categories = list_categories()
-        return categories if categories else ROLE_ACCESS['admin']
-
-    session_categories = current_allowed_categories()
-    if session_categories:
-        return session_categories
-
-    return ROLE_ACCESS.get(role, [])
-
-
-def get_access_label(role):
-    allowed = get_allowed_categories(role)
-    if role == 'admin':
-        return 'All categories'
-    if not allowed:
-        return 'No document access'
-    return ', '.join(category.replace('_', ' ').title() for category in allowed)
-
-
-def get_documents(role):
-    if role == 'admin':
-        return get_documents_by_category()
-
-    documents = []
-    for category in get_allowed_categories(role):
-        documents.extend(get_documents_by_category(category))
-    return documents
 
 
 def filter_documents(documents, category_filter='', query_filter=''):
@@ -144,25 +91,6 @@ def build_context(documents, max_documents=6):
             f"Content: {content}"
         )
     return '\n\n'.join(snippets)
-
-
-def call_local_model(prompt):
-    payload = json.dumps({
-        'model': OLLAMA_MODEL,
-        'prompt': prompt,
-        'stream': False,
-    }).encode('utf-8')
-
-    request = urllib.request.Request(
-        OLLAMA_URL,
-        data=payload,
-        headers={'Content-Type': 'application/json'},
-        method='POST',
-    )
-
-    with urllib.request.urlopen(request, timeout=540) as response:
-        response_data = json.loads(response.read().decode('utf-8'))
-    return response_data.get('response', '').strip()
 
 
 def get_document_metrics(role):
@@ -283,12 +211,16 @@ def answer_question(role, question):
     }
 
 
+# Set session cookie
 def hydrate_session(user):
     session['username'] = user['username']
     session['role'] = user['role']
-    session['allowed_categories'] = user.get('allowed_categories') or ''
+    session['allowed_categories'] = user.get('allowed_categories', [])
 
-
+# Redirect
+# trigger new session and go to new URL
+# render_template
+# remain at same URL 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -297,6 +229,7 @@ def login():
             hydrate_session(user)
             return redirect(url_for('dashboard'))
         flash_message('Invalid credentials', 'error')
+    # Automatic refer to templated folder (templates is reserved word for Flask)
     return render_template('login.html')
 
 
@@ -306,7 +239,7 @@ def logout():
     flash_message('You have been signed out.', 'info')
     return redirect(url_for('login'))
 
-
+# After entering the main it will come here (consider the root)
 @app.route('/')
 def dashboard():
     if 'role' not in session:
@@ -322,7 +255,7 @@ def dashboard():
 
     access_label = get_access_label(role)
     metrics, total_documents = get_document_metrics(role)
-    summary = generate_summary(role)
+    # summary = generate_summary(role)
     recent_logs = list_audit_logs(limit=5)
 
     return render_template(
@@ -332,7 +265,7 @@ def dashboard():
         username=current_username(),
         access_label=access_label,
         allowed_categories=get_allowed_categories(role),
-        summary=summary,
+        # summary=summary,
         metrics=metrics,
         total_documents=total_documents,
         recent_logs=recent_logs,
@@ -381,7 +314,7 @@ def upload():
         allowed_categories=allowed_categories,
         role=role,
         access_label=get_access_label(role),
-        categories=list_categories(),
+        # categories=get_allowed_categories(role):
     )
 
 
@@ -398,18 +331,15 @@ def chat():
     return render_template(
         'chat.html',
         role=role,
-        access_label=get_access_label(role),
         allowed_categories=get_allowed_categories(role),
         answer=answer,
     )
-
 
 @app.route('/admin')
 def admin_home():
     if not is_admin():
         return redirect(url_for('dashboard'))
     return redirect(url_for('admin_files'))
-
 
 @app.route('/admin/files', methods=['GET', 'POST'])
 def admin_files():
@@ -457,7 +387,7 @@ def admin_files():
                 flash_message('Choose a category for the upload.', 'error')
                 return redirect(url_for('admin_files'))
 
-            if category not in list_categories():
+            if category not in get_allowed_categories('admin'):
                 created_category = create_category(category)
                 if created_category:
                     log_audit(current_username(), 'create_category', category=created_category, details=f'Auto-created category {created_category} during upload')
@@ -490,7 +420,7 @@ def admin_files():
                 flash_message('Category, filename, and content are required.', 'error')
                 return redirect(url_for('admin_files'))
 
-            if new_category not in list_categories():
+            if new_category not in get_allowed_categories('admin'):
                 create_category(new_category)
                 log_audit(current_username(), 'create_category', category=new_category, details=f'Auto-created category {new_category} during update')
 
@@ -517,7 +447,8 @@ def admin_files():
     edit_document_id = request.args.get('edit_id')
     if edit_document_id:
         edit_document = get_document_by_id(edit_document_id)
-    upload_categories = list_categories()
+    upload_categories = get_allowed_categories('admin')
+    
 
     return render_template(
         'admin_files.html',
@@ -532,97 +463,96 @@ def admin_files():
         upload_categories=upload_categories,
     )
 
+# @app.route('/admin/users', methods=['GET', 'POST'])
+# def admin_users():
+#     if not is_admin():
+#         return redirect(url_for('dashboard'))
 
-@app.route('/admin/users', methods=['GET', 'POST'])
-def admin_users():
-    if not is_admin():
-        return redirect(url_for('dashboard'))
+#     all_categories = list_categories() or get_allowed_categories(admin)
 
-    all_categories = list_categories() or ROLE_ACCESS['admin']
+#     if request.method == 'POST':
+#         username = request.form.get('username', '').strip()
+#         password = request.form.get('password', '').strip()
+#         role = request.form.get('role', '').strip()
+#         allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
+#         action = request.form.get('action', 'create_user')
 
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
-        role = request.form.get('role', '').strip()
-        allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
-        action = request.form.get('action', 'create_user')
+#         if action == 'delete_user':
+#             user_id = request.form.get('user_id', '').strip()
+#             # user = get_user_by_id(user_id)
+#             if not user:
+#                 flash_message('User not found.', 'error')
+#                 return redirect(url_for('admin_users'))
+#             # delete_user_by_id(user_id)
+#             log_audit(current_username(), 'delete_user', details=f'Deleted user {user["username"]}')
+#             flash_message(f'User {user["username"]} deleted successfully.', 'success')
+#             return redirect(url_for('admin_users'))
 
-        if action == 'delete_user':
-            user_id = request.form.get('user_id', '').strip()
-            user = get_user_by_id(user_id)
-            if not user:
-                flash_message('User not found.', 'error')
-                return redirect(url_for('admin_users'))
-            delete_user_by_id(user_id)
-            log_audit(current_username(), 'delete_user', details=f'Deleted user {user["username"]}')
-            flash_message(f'User {user["username"]} deleted successfully.', 'success')
-            return redirect(url_for('admin_users'))
+#         if action == 'update_user':
+#             user_id = request.form.get('user_id', '').strip()
+#             # user = get_user_by_id(user_id)
+#             if not user:
+#                 flash_message('User not found.', 'error')
+#                 return redirect(url_for('admin_users'))
 
-        if action == 'update_user':
-            user_id = request.form.get('user_id', '').strip()
-            user = get_user_by_id(user_id)
-            if not user:
-                flash_message('User not found.', 'error')
-                return redirect(url_for('admin_users'))
+#             username = request.form.get('username', '').strip()
+#             role = request.form.get('role', '').strip()
+#             allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
 
-            username = request.form.get('username', '').strip()
-            role = request.form.get('role', '').strip()
-            allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
+#             if not username or not role:
+#                 flash_message('Username and role are required.', 'error')
+#                 return redirect(url_for('admin_users', edit_id=user_id))
 
-            if not username or not role:
-                flash_message('Username and role are required.', 'error')
-                return redirect(url_for('admin_users', edit_id=user_id))
+#             if role == 'admin':
+#                 allowed_categories = list_categories() or get_allowed_categories(admin)
+#             elif not allowed_categories:
+#                 flash_message('Select at least one category for the user.', 'error')
+#                 return redirect(url_for('admin_users', edit_id=user_id))
 
-            if role == 'admin':
-                allowed_categories = list_categories() or ROLE_ACCESS['admin']
-            elif not allowed_categories:
-                flash_message('Select at least one category for the user.', 'error')
-                return redirect(url_for('admin_users', edit_id=user_id))
+#             # update_user(user_id, username, role, ','.join(allowed_categories))
+#             log_audit(current_username(), 'update_user', details=f'Updated user {username} with role {role} and categories {", ".join(allowed_categories)}')
+#             flash_message(f'User {username} updated successfully.', 'success')
+#             return redirect(url_for('admin_users'))
 
-            update_user(user_id, username, role, ','.join(allowed_categories))
-            log_audit(current_username(), 'update_user', details=f'Updated user {username} with role {role} and categories {", ".join(allowed_categories)}')
-            flash_message(f'User {username} updated successfully.', 'success')
-            return redirect(url_for('admin_users'))
+#         if action == 'create_user':
+#             if not username or not password or not role:
+#                 flash_message('Username, password, and role are required.', 'error')
+#                 return redirect(url_for('admin_users'))
 
-        if action == 'create_user':
-            if not username or not password or not role:
-                flash_message('Username, password, and role are required.', 'error')
-                return redirect(url_for('admin_users'))
+#             if role == 'admin':
+#                 allowed_categories = list_categories() or get_allowed_categories(admin)
+#             elif not allowed_categories:
+#                 flash_message('Select at least one category for the user.', 'error')
+#                 return redirect(url_for('admin_users'))
 
-            if role == 'admin':
-                allowed_categories = list_categories() or ROLE_ACCESS['admin']
-            elif not allowed_categories:
-                flash_message('Select at least one category for the user.', 'error')
-                return redirect(url_for('admin_users'))
+#             try:
+#                 # add_user(username, password, role, ','.join(allowed_categories))
+#                 log_audit(
+#                     actor=current_username(),
+#                     action='create_user',
+#                     details=f'Created user {username} with role {role} and categories {", ".join(allowed_categories)}',
+#                 )
+#                 flash_message(f'User {username} created successfully.', 'success')
+#             except Exception:
+#                 flash_message('That user could not be created. It may already exist.', 'error')
 
-            try:
-                add_user(username, password, role, ','.join(allowed_categories))
-                log_audit(
-                    actor=current_username(),
-                    action='create_user',
-                    details=f'Created user {username} with role {role} and categories {", ".join(allowed_categories)}',
-                )
-                flash_message(f'User {username} created successfully.', 'success')
-            except Exception:
-                flash_message('That user could not be created. It may already exist.', 'error')
+#             return redirect(url_for('admin_users'))
 
-            return redirect(url_for('admin_users'))
+#         flash_message('Unknown admin user action.', 'error')
+#         return redirect(url_for('admin_users'))
 
-        flash_message('Unknown admin user action.', 'error')
-        return redirect(url_for('admin_users'))
-
-    users = list_users()
-    edit_user = None
-    edit_user_id = request.args.get('edit_id')
-    if edit_user_id:
-        edit_user = get_user_by_id(edit_user_id)
-    return render_template(
-        'admin_users.html',
-        users=users,
-        username=current_username(),
-        all_categories=all_categories,
-        edit_user=edit_user,
-    )
+#     # users = list_users()
+#     edit_user = None
+#     edit_user_id = request.args.get('edit_id')
+#     if edit_user_id:
+#         # edit_user = get_user_by_id(edit_user_id)
+#     return render_template(
+#         'admin_users.html',
+#         users=users,
+#         username=current_username(),
+#         all_categories=all_categories,
+#         edit_user=edit_user,
+#     )
 
 
 @app.route('/admin/audit')
@@ -634,4 +564,7 @@ def admin_audit():
 
 
 if __name__ == '__main__':
+    # Strat local Flast development server
+    # specify port 5001, Default 5000
+    # debug=True is for Auto-Reload and Interactive Debug
     app.run(port=5001, debug=True)

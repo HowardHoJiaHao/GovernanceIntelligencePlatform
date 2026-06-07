@@ -1,6 +1,5 @@
 from frontend.app import app
 
-
 def main():
     app.run(port=5001, debug=True)
 
