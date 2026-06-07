@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">Role Access</p>
+                <h2 class="text-4xl font-bold text-gray-900 mt-2">AI Document Assistant</h2>
+            </div>
+            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl px-5 py-4">
+                <p class="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-1">Allowed Categories</p>
+                <p class="text-gray-800 font-semibold">{{ allowed_categories|join(', ')|title }}</p>
+            </div>
+        </div>
+        <p class="text-gray-500 mt-4">Ask questions only from the documents your role is allowed to access. The local Gemma model will answer using those records.</p>
+    </div>
+
+    <div class="flex flex-wrap justify-center gap-3 mb-8">
+        <button onclick="document.getElementById('q').value='Summarize the latest procurement file'" class="bg-white px-5 py-2.5 rounded-full border border-gray-300 shadow-sm text-sm font-semibold text-gray-700 hover:border-indigo-500 hover:text-indigo-600 transition-all">Summarize Procurement</button>
+        <button onclick="document.getElementById('q').value='What files mention audits or bonuses?'" class="bg-white px-5 py-2.5 rounded-full border border-gray-300 shadow-sm text-sm font-semibold text-gray-700 hover:border-indigo-500 hover:text-indigo-600 transition-all">Find Related Files</button>
+    </div>
+
+    <form method="post" class="flex flex-col gap-3 sm:flex-row sm:items-center" data-loading-message="Thinking hard to give a reply... the model is searching for a sensible answer.">
+        <input id="q" type="text" name="query" placeholder="Type your question here..." class="flex-grow p-4 rounded-xl border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none transition shadow-sm">
+        <button class="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Ask Gemma</button>
+    </form>
+
+    {% if answer %}
+    <div class="mt-10 space-y-6">
+        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+            <h4 class="font-bold text-gray-900 mb-3 text-lg">Findings Summary</h4>
+            <p class="text-gray-700 whitespace-pre-line">{{ answer.summary }}</p>
+        </div>
+
+        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+            <h4 class="font-bold text-gray-900 mb-3 text-lg">Gemma Response</h4>
+            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
+                {{ answer.answer }}
+            </div>
+        </div>
+
+        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+            <h4 class="font-bold text-gray-900 mb-3 text-lg">Matched Documents</h4>
+            <div class="space-y-4">
+                {% for source in answer.sources %}
+                <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <p class="font-semibold text-gray-900">{{ source.filename }}</p>
+                    <p class="text-sm text-gray-600 mb-2">Category: {{ source.category|title }}</p>
+                    <p class="text-sm text-gray-700">{{ source.excerpt }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

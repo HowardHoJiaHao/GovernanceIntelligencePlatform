@@ -1,0 +1,31 @@
+=== CORPORATE GOVERNANCE FRAMEWORK ===
+
+Section 1.1: Authority Matrix
+
+Project Managers
+- Approval authority up to RM 50,000.
+- Any expenditure exceeding RM 50,000 requires escalation to the Department Head.
+
+Department Heads
+- Approval authority up to RM 250,000.
+- Capital expenditure requests exceeding RM 250,000 require Divisional Managing Director approval.
+
+Divisional Managing Directors
+- Approval authority up to RM 500,000 for operational expenditure.
+- Approval authority up to RM 2,000,000 for strategic initiatives.
+
+Board of Directors
+- Mandatory approval for all capital expenditure exceeding RM 5,000,000.
+- Mandatory approval for mergers, acquisitions, and strategic investments.
+
+Section 1.2: Governance Principles
+
+- Transparency in decision-making.
+- Accountability at all management levels.
+- Proper segregation of duties.
+- Compliance with regulatory requirements.
+
+Section 1.3: Document Retention
+
+- Governance records must be retained for seven years.
+- Board meeting minutes must be retained indefinitely.

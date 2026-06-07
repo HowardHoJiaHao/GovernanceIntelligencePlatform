@@ -1,0 +1,22 @@
+=== PROJECT A ===
+
+Project Name:
+Enterprise Governance Intelligence Platform
+
+Budget:
+RM 1,200,000
+
+Requirements:
+
+- ISO 27001 Certification
+- Minimum 5 years experience
+- Delivery within 6 months
+- 24/7 support
+- Minimum 3 enterprise references
+
+Evaluation Criteria
+
+Price = 40%
+Technical Capability = 30%
+Delivery Timeline = 20%
+Support Quality = 10%

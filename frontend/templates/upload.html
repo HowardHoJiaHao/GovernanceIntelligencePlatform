@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-2xl">
+    <h2 class="text-4xl font-bold text-gray-900 mb-2">Upload New Document</h2>
+    <p class="text-gray-500 mb-8">Add a new file to the knowledge base.</p>
+
+    <div class="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-5 text-gray-800">
+        <p class="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-1">Role Access</p>
+        <p class="font-semibold">{{ role|capitalize }} can upload to: {{ access_label }}</p>
+    </div>
+    
+    <form method="post" enctype="multipart/form-data" class="bg-white p-8 rounded-2xl shadow-lg border border-gray-200 space-y-6" data-loading-message="Uploading your file... the document is thinking hard about its new folder.">
+        <div>
+            <label class="block mb-2 font-semibold text-sm text-gray-700">Select Category</label>
+            <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                {% for category in allowed_categories %}
+                <option value="{{ category }}">{{ category|title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div>
+            <label class="block mb-2 font-semibold text-sm text-gray-700">Choose File (.txt)</label>
+            <input type="file" name="file" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+        </div>
+        
+        <button class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-lg hover:bg-indigo-700 transition-transform transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 shadow-lg shadow-indigo-200">
+            Sync to Database
+        </button>
+    </form>
+</div>
+{% endblock %}

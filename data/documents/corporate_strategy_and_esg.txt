@@ -1,0 +1,70 @@
+=== CORPORATE STRATEGY AND ESG FRAMEWORK ===
+
+Section 1.1: Corporate Vision
+
+The organisation aims to become a regional leader in sustainable digital transformation through innovation, governance excellence, and responsible investment practices.
+
+Section 1.2: Strategic Objectives (2026 - 2030)
+
+Objective 1:
+Accelerate digitalisation across all business units.
+
+Target:
+- 80% of business processes digitised by 2030.
+- 100% paperless procurement process by 2028.
+
+Objective 2:
+Strengthen data-driven decision making.
+
+Target:
+- All executive reports must utilise data analytics and AI-assisted insights.
+- Enterprise-wide knowledge management platform implementation by 2027.
+
+Objective 3:
+Improve operational efficiency.
+
+Target:
+- Reduce manual administrative effort by 30%.
+- Improve document retrieval efficiency by 50%.
+
+Section 1.3: ESG Commitments
+
+Environmental
+
+- Reduce organisational carbon emissions by 25% by 2030.
+- All major suppliers must provide sustainability declarations.
+- New projects must consider environmental impact assessments.
+
+Social
+
+- Minimum 40 hours of employee training annually.
+- Equal opportunity hiring policy.
+- Community investment initiatives in education and technology.
+
+Governance
+
+- Zero tolerance for fraud and corruption.
+- Annual governance audits are mandatory.
+- Procurement decisions must remain transparent and auditable.
+
+Section 1.4: Supplier Sustainability Requirements
+
+Suppliers participating in projects above RM 500,000 must:
+
+- Comply with environmental regulations.
+- Submit sustainability declarations.
+- Demonstrate ethical business practices.
+
+Section 1.5: Digital Transformation Priorities
+
+Priority 1:
+AI-enabled knowledge management.
+
+Priority 2:
+Enterprise data governance.
+
+Priority 3:
+Intelligent procurement analytics.
+
+Priority 4:
+Cybersecurity enhancement.

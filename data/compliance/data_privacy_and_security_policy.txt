@@ -1,0 +1,102 @@
+=== DATA PRIVACY AND SECURITY POLICY ===
+
+Section 3.1: Data Classification
+
+Public Data
+
+Definition:
+Information approved for public disclosure.
+
+Examples:
+- Published annual reports
+- Press releases
+
+Internal Data
+
+Definition:
+Information intended for employees only.
+
+Examples:
+- Internal procedures
+- Operational guidelines
+
+Confidential Data
+
+Definition:
+Sensitive information requiring restricted access.
+
+Examples:
+- Financial records
+- Customer information
+- Employee records
+
+Restricted Data
+
+Definition:
+Highly sensitive information requiring executive approval.
+
+Examples:
+- Acquisition plans
+- Strategic investment documents
+- Board papers
+
+Section 3.2: Access Control Requirements
+
+Employees may only access information necessary for their role.
+
+Access Requests
+
+- Manager approval required.
+- Information owner approval required.
+
+Quarterly access reviews are mandatory.
+
+Section 3.3: Password Policy
+
+- Minimum 12 characters.
+- Multi-factor authentication mandatory.
+- Password expiration every 90 days.
+
+Section 3.4: Data Breach Response
+
+Severity Level 1
+
+- Internal reporting within 24 hours.
+
+Severity Level 2
+
+- Security team notification within 4 hours.
+
+Severity Level 3
+
+- Executive notification within 1 hour.
+- Incident response team activation.
+
+Section 3.5: Third-Party Data Handling
+
+Suppliers accessing company systems must:
+
+- Sign confidentiality agreements.
+- Pass security assessment.
+- Comply with data protection requirements.
+
+Section 3.6: Security Violations
+
+Examples:
+
+- Sharing confidential information
+- Unauthorized system access
+- Improper data storage
+
+All confirmed security violations are automatically classified as High Risk incidents.
+
+Section 3.7: AI Governance
+
+AI systems must:
+
+- Log all user interactions.
+- Maintain audit trails.
+- Protect confidential information.
+- Restrict access based on user roles.
+
+Sensitive company data must not be exposed to unauthorized users.

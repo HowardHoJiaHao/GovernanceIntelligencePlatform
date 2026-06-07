@@ -1,0 +1,105 @@
+=== RISK AND COMPLIANCE FRAMEWORK ===
+
+Section 2.1: Risk Categories
+
+Operational Risk
+
+- Process failures
+- System downtime
+- Human error
+
+Financial Risk
+
+- Budget overruns
+- Fraud
+- Revenue loss
+
+Compliance Risk
+
+- Regulatory breaches
+- Policy violations
+- Contractual non-compliance
+
+Cybersecurity Risk
+
+- Data breaches
+- Unauthorized access
+- Malware incidents
+
+Section 2.2: Risk Classification
+
+Low Risk
+
+- Financial impact below RM 50,000
+- No regulatory consequences
+
+Medium Risk
+
+- Financial impact between RM 50,000 and RM 500,000
+- Limited operational disruption
+
+High Risk
+
+- Financial impact exceeding RM 500,000
+- Reputational damage
+- Legal consequences
+
+Critical Risk
+
+- Significant regulatory violation
+- Major data breach
+- Fraud involving senior management
+
+Section 2.3: Escalation Matrix
+
+Low Risk
+
+- Managed by Department Manager
+
+Medium Risk
+
+- Requires mitigation plan
+- Requires Head of Department approval
+
+High Risk
+
+- Immediate escalation to Risk Management Committee
+
+Critical Risk
+
+- Immediate notification to Executive Committee
+- Board notification required within 24 hours
+
+Section 2.4: Compliance Requirements
+
+Mandatory Compliance Areas
+
+- Procurement
+- Data Privacy
+- Financial Reporting
+- Anti-Bribery and Anti-Corruption
+
+Section 2.5: Non-Compliance Penalties
+
+Minor Violation
+
+- Written warning
+
+Major Violation
+
+- Internal investigation
+
+Critical Violation
+
+- Suspension of operations
+- Regulatory reporting
+
+Section 2.6: Vendor Compliance Requirements
+
+All suppliers must:
+
+- Maintain compliance score above 80%
+- Pass annual compliance review
+- Report any legal investigations
+
+Suppliers with compliance score below 70% are classified as High Risk.

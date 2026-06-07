@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-6xl space-y-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-8">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">Role Access</p>
+                <h1 class="text-4xl font-bold text-gray-900 mb-3">Document Repository</h1>
+                <p class="text-gray-600 max-w-2xl">Your role is {{ role|capitalize }} and you can access <span class="font-semibold text-gray-900">{{ access_label }}</span>.</p>
+            </div>
+            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl px-5 py-4 min-w-[240px]">
+                <p class="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-2">Allowed Categories</p>
+                <p class="text-gray-800 font-semibold">{{ allowed_categories|join(', ')|title }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <p class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Total Documents</p>
+            <p class="text-3xl font-bold text-gray-900">{{ total_documents }}</p>
+        </div>
+        {% for metric in metrics %}
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <p class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">{{ metric.category|title }}</p>
+            <p class="text-3xl font-bold text-gray-900">{{ metric.count }}</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-gray-900">AI Summary</h2>
+                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">Gemma</span>
+            </div>
+            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
+                {{ summary }}
+            </div>
+        </div>
+
+</div>
+{% endblock %}

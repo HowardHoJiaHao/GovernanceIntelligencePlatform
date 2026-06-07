@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-7xl space-y-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-8">
+        <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">Admin Console</p>
+        <h1 class="text-4xl font-bold text-gray-900 mb-3">Manage Files</h1>
+        <p class="text-gray-600">Upload new TXT files, replace existing documents, create categories, and keep the SQLite database synced with the text folders.</p>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-3">
+        <form method="post" enctype="multipart/form-data" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5 xl:col-span-2" data-loading-message="Uploading file... the document is thinking hard about its new home.">
+            <input type="hidden" name="action" value="upload_document">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-900">Upload New TXT File</h2>
+                    <p class="text-sm text-gray-500 mt-1">Admins can create a new category automatically by typing one here.</p>
+                </div>
+                <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700">+ Upload</span>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                    <label class="block mb-2 font-semibold text-sm text-gray-700">Category</label>
+                    <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        {% for category in upload_categories %}
+                        <option value="{{ category }}">{{ category|title }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block mb-2 font-semibold text-sm text-gray-700">Choose File (.txt)</label>
+                <input type="file" name="file" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+            </div>
+
+            <button class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Upload and Sync</button>
+        </form>
+
+        <div class="space-y-6">
+            <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Creating the new category... the folder is stretching its legs.">
+                <input type="hidden" name="action" value="create_category">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-gray-900">Create Category</h2>
+                    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">Folder</span>
+                </div>
+                <div>
+                    <label class="block mb-2 font-semibold text-sm text-gray-700">Category Name</label>
+                    <input type="text" name="category_name" placeholder="policy_updates" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                </div>
+                <button class="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-lg hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">Create Category</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 space-y-5">
+        <form method="get" class="grid gap-4 lg:grid-cols-3 items-end">
+            <div>
+                <label class="block mb-2 text-sm font-semibold text-gray-700">Search</label>
+                <input type="text" name="q" value="{{ query_filter }}" placeholder="Search filename or content" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+            </div>
+            <div>
+                <label class="block mb-2 text-sm font-semibold text-gray-700">Filter by Category</label>
+                <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                    <option value="">All categories</option>
+                    {% for category in upload_categories %}
+                    <option value="{{ category }}" {% if category_filter == category %}selected{% endif %}>{{ category|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex gap-3">
+                <button class="flex-1 rounded-lg bg-gray-900 px-4 py-3 font-bold text-white hover:bg-gray-800">Apply Filters</button>
+                <a href="{{ url_for('admin_files') }}" class="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-center font-bold text-gray-700 hover:bg-gray-50">Reset</a>
+            </div>
+        </form>
+    </div>
+
+    {% if edit_document %}
+    <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Saving the edit... the document is taking notes very seriously.">
+        <input type="hidden" name="action" value="update_document">
+        <input type="hidden" name="document_id" value="{{ edit_document['id'] }}">
+        <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-900">Edit Document: {{ edit_document['filename'] }}</h2>
+            <a href="{{ url_for('admin_files') }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Close editor</a>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+            <div>
+                <label class="block mb-2 font-semibold text-sm text-gray-700">Category</label>
+                <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                    {% for category in upload_categories %}
+                    <option value="{{ category }}" {% if edit_document['category'] == category %}selected{% endif %}>{{ category|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block mb-2 font-semibold text-sm text-gray-700">Filename</label>
+                <input type="text" name="filename" value="{{ edit_document['filename'] }}" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+            </div>
+        </div>
+        <div>
+            <label class="block mb-2 font-semibold text-sm text-gray-700">Content</label>
+            <textarea name="content" rows="12" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">{{ edit_document['content'] }}</textarea>
+        </div>
+        <button class="rounded-lg bg-amber-600 px-6 py-3 font-bold text-white hover:bg-amber-700">Save Changes</button>
+    </form>
+    {% endif %}
+
+    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+        <div class="flex items-center justify-between border-b border-gray-200 px-6 py-5">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900">Documents</h2>
+                <p class="text-sm text-gray-500">Showing {{ total_filtered }} record(s), page {{ page }} of {{ total_pages }}.</p>
+            </div>
+        </div>
+        <table class="w-full text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                    <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Filename</th>
+                    <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Category</th>
+                    <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Updated</th>
+                    <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for document in documents %}
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="px-6 py-4 font-medium text-gray-800">{{ document['filename'] }}</td>
+                    <td class="px-6 py-4">
+                        <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-800">{{ document['category']|title }}</span>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ document['updated_at'] }}</td>
+                    <td class="px-6 py-4">
+                        <div class="flex flex-wrap gap-2">
+                            <a href="{{ url_for('admin_files', edit_id=document['id'], page=page, category=category_filter, q=query_filter) }}" class="rounded-lg border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Edit</a>
+                            <form method="post" class="inline" data-loading-message="Deleting the file... even bad paperwork deserves a proper goodbye.">
+                                <input type="hidden" name="action" value="delete_document">
+                                <input type="hidden" name="document_id" value="{{ document['id'] }}">
+                                <button type="submit" onclick="return confirm('Delete {{ document.filename }}?')" class="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+            <p class="text-sm text-gray-500">10 records per page.</p>
+            <div class="flex gap-2">
+                {% if page > 1 %}
+                <a class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50" href="{{ url_for('admin_files', page=page-1, category=category_filter, q=query_filter, edit_id=edit_document['id'] if edit_document else None) }}">Previous</a>
+                {% endif %}
+                {% if page < total_pages %}
+                <a class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50" href="{{ url_for('admin_files', page=page+1, category=category_filter, q=query_filter, edit_id=edit_document['id'] if edit_document else None) }}">Next</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="flex justify-end">
+        <a href="{{ url_for('admin_audit') }}" class="rounded-lg border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50">Open Audit Log Tab</a>
+    </div>
+</div>
+{% endblock %}

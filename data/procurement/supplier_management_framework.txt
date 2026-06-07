@@ -1,0 +1,24 @@
+=== SUPPLIER MANAGEMENT FRAMEWORK ===
+
+Section 5.1: Supplier Evaluation Weightage
+
+Price = 40%
+Technical Capability = 30%
+Delivery Timeline = 20%
+Support Quality = 10%
+
+Section 5.2: Mandatory Requirements
+
+- Minimum 5 years experience
+- ISO 27001 certification
+- Minimum 3 enterprise references
+- Compliance score above 80%
+
+Section 5.3: High Risk Suppliers
+
+A supplier is classified as High Risk if:
+
+- Compliance score below 70%
+- Ongoing legal dispute
+- Failed audit findings
+- More than 3 late deliveries within 12 months
