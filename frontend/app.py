@@ -57,7 +57,7 @@ def flash_message(message, category='info'):
 def parse_categories(values):
     return [value.strip().lower() for value in values if value.strip()]
 
-
+# For filter use
 def filter_documents(documents, category_filter='', query_filter=''):
     filtered_documents = list(documents)
     if category_filter:
@@ -71,7 +71,7 @@ def filter_documents(documents, category_filter='', query_filter=''):
         ]
     return filtered_documents
 
-
+# for pagination
 def paginate_items(items, page):
     total = len(items)
     total_pages = max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1)
@@ -80,7 +80,7 @@ def paginate_items(items, page):
     end = start + PAGE_SIZE
     return items[start:end], page, total_pages, total
 
-
+# write it into sentences filename, category, content
 def build_context(documents, max_documents=6):
     snippets = []
     for document in documents[:max_documents]:
@@ -92,7 +92,7 @@ def build_context(documents, max_documents=6):
         )
     return '\n\n'.join(snippets)
 
-
+# Dashboard numbers
 def get_document_metrics(role):
     documents = get_documents(role)
     category_counts = {}
@@ -109,25 +109,35 @@ def get_document_metrics(role):
 
 
 def rank_documents(role, query_text):
+    # 1. Fetch all documents available to the user based on their specific role
     documents = get_documents(role)
+    # 2. If the user has no documents available, return an empty list immediately
     if not documents:
         return []
-
+    # 3. Clean the query: find all alphanumeric words, convert to lowercase, 
+    #    and ignore words with 2 or fewer characters (like 'in', 'at', 'is')
     query_terms = {term for term in re.findall(r'[a-z0-9]+', query_text.lower()) if len(term) > 2}
+    # 4. If the query cleaning resulted in no useful terms, return the first 5 documents as a default
     if not query_terms:
         return documents[:5]
-
+    # 5. Initialize an empty list to store tuples of (relevance_score, document_object)
     scored_documents = []
+    # 6. Iterate through every available document to calculate its relevance
     for document in documents:
+        # 7. Create a single combined string of metadata and content for searching
         haystack = f"{document['filename']} {document['category']} {document['content']}".lower()
+        # 8. Calculate score: count how many unique query terms exist in this document's text
         score = sum(1 for term in query_terms if term in haystack)
+        # 9. Store the score along with the original document
         scored_documents.append((score, document))
-
+    # 10. Sort the list of documents by their score in descending order (highest score first)
     scored_documents.sort(key=lambda item: item[0], reverse=True)
+    # 11. Create a list of only those documents that actually matched at least one term (score > 0)
     ranked_documents = [document for score, document in scored_documents if score > 0]
+    # 12. Return the top 5 matches; if nothing matched the query, default to returning the first 5 original documents
     return ranked_documents[:5] if ranked_documents else documents[:5]
 
-
+# Find parts fo the document that match
 def build_excerpt(content, query_text, length=160):
     if not content:
         return 'No excerpt available.'
@@ -142,27 +152,6 @@ def build_excerpt(content, query_text, length=160):
             return content[start:end].strip()
 
     return content[:length].strip()
-
-
-def generate_summary(role):
-    documents = get_documents(role)
-    if not documents:
-        return 'No documents are available for your role yet.'
-
-    context = build_context(documents)
-    prompt = (
-        'You are a concise document analyst. Summarize the accessible documents for this role. '
-        'Start with a one-line summary, then list 3 to 5 short bullets. '
-        'Do not mention documents outside the allowed categories.\n\n'
-        f'Role: {role}\n'
-        f'Allowed categories: {", ".join(get_allowed_categories(role))}\n\n'
-        f'Documents:\n{context}'
-    )
-
-    try:
-        return call_local_model(prompt)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return 'Gemma is not available right now. Showing the accessible documents instead.'
 
 
 def answer_question(role, question):
@@ -255,7 +244,6 @@ def dashboard():
 
     access_label = get_access_label(role)
     metrics, total_documents = get_document_metrics(role)
-    # summary = generate_summary(role)
     recent_logs = list_audit_logs(limit=5)
 
     return render_template(
@@ -265,7 +253,6 @@ def dashboard():
         username=current_username(),
         access_label=access_label,
         allowed_categories=get_allowed_categories(role),
-        # summary=summary,
         metrics=metrics,
         total_documents=total_documents,
         recent_logs=recent_logs,

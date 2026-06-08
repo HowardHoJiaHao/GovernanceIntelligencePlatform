@@ -1,3 +1,8 @@
+Project Name:
+Enterprise Governance Intelligence Platform
+
+This project is from Sunway working with 42Kl the total time expected to finish is 24 days
+
 === SUPPLIER ALPHA ===
 
 Price:
