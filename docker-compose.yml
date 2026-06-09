@@ -1,34 +1,41 @@
-version: '3.8'
-
 services:
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
     container_name: backend
-    ports:
-      - "8001:8000"
-    env_file:
-      - .env
-    networks:
-      - document_network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: frontend
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+    env_file: .env
+    # This ensures Docker runs your code from inside the 'backend' folder
+    working_dir: /app/backend
+    volumes:
+      # Map root to /app so both DB and 'backend' folder are visible
+      - .:/app
+      - chroma_data:/app/chroma_db
     environment:
-      - BACKEND_URL=http://backend:8000
+      - DB_PATH=${DB_PATH}
+      - DATA_ROOT=${DATA_ROOT}
+      - BACKEND_PORT=5001
+    ports:
+      - "5001:5001"
     networks:
-      - document_network
+      - app-network
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+      
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    env_file: .env  # This tells Docker to load your .env file
+    ports:
+      - "5000:5000"
+    environment:
+      - BACKEND_URL=http://backend:5001
     depends_on:
       - backend
+    networks:
+      - app-network
 
 networks:
-  document_network:
+  app-network:
     driver: bridge
+
+volumes:
+  chroma_data:

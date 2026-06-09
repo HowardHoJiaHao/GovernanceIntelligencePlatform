@@ -8,7 +8,7 @@
     </div>
 
     <!-- <div class="grid gap-6 xl:grid-cols-3"> -->
-    <form method="post" enctype="multipart/form-data" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5 xl:col-span-2" data-loading-message="Uploading file... the document is thinking hard about its new home.">
+    <form method="post" enctype="multipart/form-data" id="uploadForm" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5 xl:col-span-2" data-loading-message="Uploading file... the document is thinking hard about its new home.">
         <input type="hidden" name="action" value="upload_document">
         <div class="flex items-center justify-between">
             <div>
@@ -34,9 +34,24 @@
             <input type="file" name="file" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
         </div>
 
-        <button class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Upload and Sync</button>
+        <button type="submit" id="submitBtn" class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Upload and Sync</button>
     </form>
-
+    <script>
+    document.getElementById('uploadForm').addEventListener('submit', function(event) {
+        const btn = document.getElementById('submitBtn');
+        
+        // Check if already disabled to prevent accidental double submission
+        if (btn.disabled) {
+            event.preventDefault();
+            return;
+        }
+        
+        // Disable the button and change text to show status
+        btn.disabled = true;
+        btn.innerText = "Syncing..."; 
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        });
+    </script>
         <!-- <div class="space-y-6">
             <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Creating the new category... the folder is stretching its legs.">
                 <input type="hidden" name="action" value="create_category">
@@ -76,13 +91,18 @@
     </div>
 
     {% if edit_document %}
-    <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Saving the edit... the document is taking notes very seriously.">
+    <form method="post" enctype="multipart/form-data" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Saving the edit... the document is taking notes very seriously.">
         <input type="hidden" name="action" value="update_document">
         <input type="hidden" name="document_id" value="{{ edit_document['id'] }}">
+        
+        <input type="hidden" name="old_category" value="{{ edit_document['category'] }}">
+        <input type="hidden" name="old_filename" value="{{ edit_document['filename'] }}">
+
         <div class="flex items-center justify-between">
             <h2 class="text-2xl font-bold text-gray-900">Edit Document: {{ edit_document['filename'] }}</h2>
             <a href="{{ url_for('admin_files') }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Close editor</a>
         </div>
+        
         <div class="grid gap-4 md:grid-cols-2">
             <div>
                 <label class="block mb-2 font-semibold text-sm text-gray-700">Category</label>
@@ -97,10 +117,12 @@
                 <input type="text" name="filename" value="{{ edit_document['filename'] }}" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
             </div>
         </div>
+        
         <div>
             <label class="block mb-2 font-semibold text-sm text-gray-700">Content</label>
             <textarea name="content" rows="12" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">{{ edit_document['content'] }}</textarea>
         </div>
+        
         <button class="rounded-lg bg-amber-600 px-6 py-3 font-bold text-white hover:bg-amber-700">Save Changes</button>
     </form>
     {% endif %}

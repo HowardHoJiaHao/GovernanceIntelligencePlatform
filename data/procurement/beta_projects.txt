@@ -1,0 +1,11 @@
+Project Alpha: Future Roadmap.
+The goal for next quarter is to add user authentication to the AI Dashboard. 
+We plan to use JWT tokens and secure the API endpoints.
+
+Project Beta: Database Optimization.
+After the data pipeline is set up, we will index the SQL tables to speed up 
+query times. This is the second phase of the Data Pipeline project.
+
+Project Gamma: Security Audit.
+Before finalizing the Cloud Migration, we need to perform a penetration test on 
+the AWS environment to ensure no data leaks occur.

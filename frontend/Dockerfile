@@ -1,18 +1,21 @@
-FROM python:3.14.4-bookworm
+# frontend/Dockerfile
+FROM python:3.14-slim
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
+# Install uv
+RUN pip install uv
 
-RUN pip install uv && uv pip install --system --requirement pyproject.toml
+# Copy requirements file
+COPY requirements.txt .
 
-COPY . .
+# Install dependencies with uv
+RUN uv venv && uv pip install -r requirements.txt
 
-EXPOSE 8000
+# Copy frontend code
+COPY app.py .
+COPY templates/ ./templates/
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 5000
 
-# docker compose down --rmi all
-# docker builder prune -af
-# docker compose build --no-cache
-# docker compose up
+CMD ["uv", "run", "python", "app.py"]

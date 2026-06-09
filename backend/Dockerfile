@@ -1,14 +1,18 @@
-FROM python:3.14.4-bookworm
+# Use a slim Python base image
+FROM python:3.11-slim
 
-WORKDIR /app
+# Set the working directory to the backend folder
+WORKDIR /app/backend
 
-COPY pyproject.toml ./
+# Copy the requirements file first (for better caching)
+COPY requirements.txt .
 
-RUN pip install fastapi uvicorn
-
+# Install dependencies directly using pip
+RUN apt-get update && apt-get install -y sqlite3 && rm -rf /var/lib/apt/lists/* gcc g++
+# Install dependencies (This is the missing step!)
+RUN pip install --no-cache-dir -r requirements.txt
+# Copy the rest of your backend code
 COPY . .
 
-EXPOSE 8000
-
-# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-CMD ["uvicorn", "database_logic:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the API script directly
+CMD ["python3", "api.py"]

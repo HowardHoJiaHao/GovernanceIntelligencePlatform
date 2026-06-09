@@ -3,37 +3,20 @@ import os
 import re
 import urllib.error # Send requests to websites
 import urllib.request # handle error 
-
+import requests
 from dotenv import load_dotenv # Get enviroment variable from .env
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend.database_logic import (
-    authenticate_user,
-    bootstrap_database,
-    create_category,
-    delete_document_by_id,
-    get_document_by_id,
-    get_documents,
-    get_documents_by_category,
-    list_audit_logs,
-    get_access_label,
-    log_audit,
-    save_text_document,
-    get_allowed_categories,
-    call_local_model,
-)
 
 load_dotenv()
 
 app = Flask(__name__)
-# app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key')
 
+BACKEND_URL = os.getenv('BACKEND_URL', 'http://backend:5001')
 app.secret_key = os.getenv('SECRET_KEY', 'a-very-long-and-random-fallback-key')
-
 PAGE_SIZE = 10
 
-bootstrap_database()
 
 # Tries to grab the username from the current browser session. 
 # If the user isn't logged in, it defaults to 'guest'
@@ -56,6 +39,124 @@ def flash_message(message, category='info'):
 # lowercase and removing empty value
 def parse_categories(values):
     return [value.strip().lower() for value in values if value.strip()]
+
+# Updated to ensure robust data extraction
+def get_allowed_categories(role):
+    """Fetches allowed categories from the Backend API."""
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/categories/{role}", timeout=5)
+        if response.status_code == 200:
+            # Assuming backend returns a list directly or a dict with a 'categories' key
+            data = response.json()
+            return data.get('categories', data) if isinstance(data, dict) else data
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching categories: {e}")
+        return []
+
+def list_audit_logs(limit=5):
+    """Fetches audit logs from the Backend API."""
+    try:
+        response = requests.get(
+            f"{BACKEND_URL}/api/audit/logs",
+            params={"limit": limit},
+            timeout=5
+        )
+        if response.status_code == 200:
+            # Ensure it returns a list
+            data = response.json()
+            return data.get('logs', data) if isinstance(data, dict) else data
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching audit logs: {e}")
+        return []
+
+def get_ai_response(prompt):
+    """Requests an AI response from the backend."""
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/api/generate", 
+            json={"prompt": prompt}, 
+            timeout=600
+        )
+        if response.status_code == 200:
+            # Explicitly match the backend key 'model_answer'
+            return response.json().get('model_answer', 'No answer returned.')
+        return f"Error: Backend returned status {response.status_code}"
+    except requests.exceptions.RequestException as e:
+        return f"Error: Could not connect to AI service: {str(e)}"
+
+def get_RAG_ai_response(prompt):
+    """Requests an AI response from the backend."""
+    try:
+        response = requests.post(
+            f"{BACKEND_URL}/api/RAG",
+            json={"prompt": prompt}, 
+            timeout=600
+        )
+        if response.status_code == 200:
+            # Explicitly match the backend key 'model_answer'
+            return response.json().get('RAG_model_answer', 'No answer returned from RAG.')
+        return f"Error: Backend returned status {response.status_code}"
+    except requests.exceptions.RequestException as e:
+        return f"Error: Could not connect to AI service: {str(e)}"
+
+def save_text_document(category, filename, content, actor, action, 
+                       previous_category=None, previous_filename=None):
+    """
+    Centralized function for document operations (upload, update, delete).
+    """
+    try:
+        # Build the dynamic payload
+        # file = request.files.get('file')
+        # filename = secure_filename(file.filename) if file else ""
+        # content = file.read().decode('utf-8', errors='ignore') if file else request.form.get('content', '')
+        file = request.files.get('file')
+
+        if file and file.filename:
+            filename = secure_filename(file.filename)
+            # Read the file content once into a variable
+            content = file.read().decode('utf-8', errors='ignore')
+        else:
+            # If no file, use the manual content entry
+            filename = request.form.get('filename', 'default.txt')
+            content = request.form.get('content', '')
+
+        # CRITICAL: Strip the content here before it goes anywhere else
+        content = content.strip()
+        payload = {
+            'category': category,
+            'filename': filename,
+            'content': content,
+            'actor': actor,
+            'action': action
+        }
+        
+        # Only add previous metadata if they exist (used for updates)
+        if previous_category: payload['previous_category'] = previous_category
+        if previous_filename: payload['previous_filename'] = previous_filename
+        
+        # Perform the POST request
+        response = requests.post(
+            f"{BACKEND_URL}/api/documents",
+            json=payload,
+            timeout=30
+        )
+        
+        # Handle API response based on status code
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code >= 400:
+            # Try to get error message from backend, fallback to text
+            error_data = response.json() if 'application/json' in response.headers.get('Content-Type', '') else {}
+            return {'success': False, 'error': error_data.get('error', f"HTTP Error {response.status_code}")}
+            
+    except requests.exceptions.RequestException as e:
+        # Catch connection, timeout, and DNS errors
+        return {'success': False, 'error': f"Connection failed: {str(e)}"}
+    except Exception as e:
+        # Catch unexpected errors
+        return {'success': False, 'error': f"Unexpected error: {str(e)}"}
 
 # For filter use
 def filter_documents(documents, category_filter='', query_filter=''):
@@ -94,48 +195,82 @@ def build_context(documents, max_documents=6):
 
 # Dashboard numbers
 def get_document_metrics(role):
-    documents = get_documents(role)
+    """
+    Fetches documents and calculates metrics. 
+    Consider moving the count logic to the backend for better performance!
+    """
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/documents/{role}", timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            documents = data.get('documents', [])
+        else:
+            flash(f"Could not retrieve documents (Status: {response.status_code}).", "error")
+            documents = [] 
+            
+    except requests.exceptions.RequestException as e:
+        flash("Backend service is currently unreachable.", "error")
+        documents = []
+    
+    # Calculate counts using a dictionary comprehension for speed
+    # This counts occurrences of each category present in the document list
     category_counts = {}
-    for document in documents:
-        category_counts[document['category']] = category_counts.get(document['category'], 0) + 1
+    for doc in documents:
+        cat = doc.get('category', 'Uncategorized')
+        category_counts[cat] = category_counts.get(cat, 0) + 1
 
-    ordered_categories = get_allowed_categories(role)
+    # Get allowed categories to ensure the dashboard only shows what the user can see
+    allowed_categories = get_allowed_categories(role)
+    
+    # Map the counts to the allowed categories
     metrics = [
-        {'category': category, 'count': category_counts.get(category, 0)}
-        for category in ordered_categories
+        {'category': cat, 'count': category_counts.get(cat, 0)}
+        for cat in allowed_categories
     ]
-    total_documents = sum(metric['count'] for metric in metrics)
+    
+    total_documents = sum(m['count'] for m in metrics)
     return metrics, total_documents
 
-
 def rank_documents(role, query_text):
-    # 1. Fetch all documents available to the user based on their specific role
-    documents = get_documents(role)
-    # 2. If the user has no documents available, return an empty list immediately
+    """
+    Ranks documents based on keyword matching (TF-like scoring).
+    """
+    # 1. Fetch documents
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/documents/{role}", timeout=5)
+        documents = response.json().get('documents', []) if response.status_code == 200 else []
+    except requests.exceptions.RequestException:
+        flash("Backend service is currently unreachable.", "error")
+        return []
+
     if not documents:
         return []
-    # 3. Clean the query: find all alphanumeric words, convert to lowercase, 
-    #    and ignore words with 2 or fewer characters (like 'in', 'at', 'is')
+
+    # 2. Clean query: Lowercase, alphanumeric, length > 2
     query_terms = {term for term in re.findall(r'[a-z0-9]+', query_text.lower()) if len(term) > 2}
-    # 4. If the query cleaning resulted in no useful terms, return the first 5 documents as a default
     if not query_terms:
         return documents[:5]
-    # 5. Initialize an empty list to store tuples of (relevance_score, document_object)
+
+    # 3. Calculate scores
     scored_documents = []
-    # 6. Iterate through every available document to calculate its relevance
-    for document in documents:
-        # 7. Create a single combined string of metadata and content for searching
-        haystack = f"{document['filename']} {document['category']} {document['content']}".lower()
-        # 8. Calculate score: count how many unique query terms exist in this document's text
+    for doc in documents:
+        # Use .get() to avoid KeyError if data is missing
+        haystack = f"{doc.get('filename', '')} {doc.get('category', '')} {doc.get('content', '')}".lower()
+        
+        # Scoring: Count unique query terms present
         score = sum(1 for term in query_terms if term in haystack)
-        # 9. Store the score along with the original document
-        scored_documents.append((score, document))
-    # 10. Sort the list of documents by their score in descending order (highest score first)
+        
+        if score > 0:
+            scored_documents.append((score, doc))
+
+    # 4. Sort and return
+    # Sort by score (descending)
     scored_documents.sort(key=lambda item: item[0], reverse=True)
-    # 11. Create a list of only those documents that actually matched at least one term (score > 0)
-    ranked_documents = [document for score, document in scored_documents if score > 0]
-    # 12. Return the top 5 matches; if nothing matched the query, default to returning the first 5 original documents
-    return ranked_documents[:5] if ranked_documents else documents[:5]
+    
+    ranked = [doc for score, doc in scored_documents]
+    return ranked[:5] if ranked else documents[:5]
+
 
 # Find parts fo the document that match
 def build_excerpt(content, query_text, length=160):
@@ -175,9 +310,14 @@ def answer_question(role, question):
     )
 
     try:
-        model_answer = call_local_model(prompt)
+        model_answer = get_ai_response(prompt)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         model_answer = 'Gemma is not available right now. Please try again after starting Ollama locally.'
+    
+    # try:
+    #     RAG_model_answer = get_RAG_ai_response(prompt)
+    # except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+    #     RAG_model_answer = 'RAG is not available right now. Please try again after starting Ollama locally.'
 
     sources = [
         {
@@ -195,10 +335,11 @@ def answer_question(role, question):
 
     return {
         'answer': model_answer,
+        # 'answer': 'hi',
+        # 'RAG_answer': RAG_model_answer,
         'sources': sources,
         'summary': summary,
     }
-
 
 # Set session cookie
 def hydrate_session(user):
@@ -213,12 +354,38 @@ def hydrate_session(user):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user = authenticate_user(request.form['username'].strip(), request.form['password'])
-        if user:
-            hydrate_session(user)
-            return redirect(url_for('dashboard'))
-        flash_message('Invalid credentials', 'error')
-    # Automatic refer to templated folder (templates is reserved word for Flask)
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        
+        try:
+            # Send credentials to the backend
+            # Ensure BACKEND_URL is set in your environment
+            response = requests.post(
+                f"{BACKEND_URL}/api/login", 
+                json={"username": username, "password": password},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                # Successfully authenticated
+                user_data = response.json().get('user', {})
+                session['username'] = user_data.get('username')
+                session['role'] = user_data.get('role')
+                # Optional: Store allowed categories if returned by backend
+                session['allowed_categories'] = user_data.get('allowed_categories', [])
+                
+                return redirect(url_for('dashboard'))
+            
+            # Handle non-200 responses
+            flash('Invalid username or password.', 'error')
+            
+        except requests.exceptions.ConnectionError:
+            flash('Backend service is unreachable. Please try again later.', 'error')
+        except requests.exceptions.Timeout:
+            flash('Login request timed out.', 'error')
+        except Exception as e:
+            flash(f'An unexpected error occurred: {str(e)}', 'error')
+        
     return render_template('login.html')
 
 
@@ -231,24 +398,53 @@ def logout():
 # After entering the main it will come here (consider the root)
 @app.route('/')
 def dashboard():
+    # 1. Session Authentication
     if 'role' not in session:
         return redirect(url_for('login'))
 
     role = current_role()
-    documents = get_documents(role)
+    documents = []
+    access_label = "Guest"
+    # 2. Data Retrieval with Error Handling
+    # We use a try-except block to ensure one failing API call doesn't crash the page
+    try:
+        resp_docs = requests.get(f"{BACKEND_URL}/api/documents/{role}", timeout=20)
+    
+        # --- INSPECTION BLOCK ---
+        if resp_docs.status_code == 200:
+            data = resp_docs.json()
+            documents = data.get('documents', [])
+            print(f"DEBUG: Frontend received {len(documents)} items.")
+            print(f"DEBUG: Sample item: {documents[0] if documents else 'Empty List'}")
+        else:
+            print(f"DEBUG: API Error: {resp_docs.status_code}")
+            documents = []
+    # ------------------------
+    except requests.exceptions.RequestException:
+        flash("Some dashboard components are currently unavailable.", "warning")
+        documents, access_label = [], "Guest"
+
+    # 3. Filtering and Pagination
+    # Extraction of URL parameters
     category_filter = request.args.get('category', '').strip().lower()
     query_filter = request.args.get('q', '').strip()
-    filtered_documents = filter_documents(documents, category_filter, query_filter)
+    
+    # Apply filters to the document list
+    filtered_docs = filter_documents(documents, category_filter, query_filter)
+    
+    # Calculate pagination logic
     page = request.args.get('page', 1, type=int)
-    paginated_documents, page, total_pages, total_filtered = paginate_items(filtered_documents, page)
+    paginated_docs, page, total_pages, total_filtered = paginate_items(filtered_docs, page)
 
-    access_label = get_access_label(role)
+    # 4. Auxiliary Data Gathering
+    # Metrics and logs are fetched separately to modularize backend load
     metrics, total_documents = get_document_metrics(role)
     recent_logs = list_audit_logs(limit=5)
 
+    # 5. Template Rendering
     return render_template(
         'dashboard.html',
-        docs=paginated_documents,
+        docs=paginated_docs,
         role=role,
         username=current_username(),
         access_label=access_label,
@@ -263,47 +459,73 @@ def dashboard():
         query_filter=query_filter,
     )
 
-
 @app.route('/upload', methods=['GET', 'POST'])
 def upload():
+    # 1. Authorization Check
     if 'role' not in session:
         return redirect(url_for('login'))
 
     role = current_role()
     allowed_categories = get_allowed_categories(role)
 
+    # 2. Handle POST Request
     if request.method == 'POST':
         file = request.files.get('file')
         category = request.form.get('category', '').strip().lower()
 
+        # Validation: Check for file presence
         if not file or not file.filename:
             flash_message('Please choose a text file before uploading.', 'error')
             return redirect(url_for('upload'))
 
-        if category not in allowed_categories and not is_admin():
+        # Validation: Role-based access control
+        if not is_admin() and category not in allowed_categories:
             flash_message('You do not have permission to upload to that category.', 'error')
             return redirect(url_for('upload'))
 
-        filename = secure_filename(file.filename)
-        content = file.read().decode('utf-8', errors='ignore')
-        save_text_document(
-            category=category,
-            filename=filename,
-            content=content,
-            actor=current_username(),
-            action='upload',
-        )
-        flash_message('Success! Your file has been saved to the database and synced to the text files.', 'success')
+        # Processing: Read and sanitize
+        try:
+            filename = secure_filename(file.filename)
+            content = file.read().decode('utf-8', errors='ignore')
+            
+            # API Communication
+            result = save_text_document(
+                category=category,
+                filename=filename,
+                content=content,
+                actor=current_username(),
+                action='upload'
+            )
+            
+            # DEBUG: Print the raw result
+            print(f"DEBUG: API result received: {result}", flush=True)
+
+            # Response Handling
+            if result.get('success'):
+                flash_message('Success! Your file has been saved to the database.', 'success')
+            else:
+                flash_message(f"Upload failed: {result.get('error', 'Server error')}", 'error')
+                
+        except Exception as e:
+            flash_message(f"Critical error during file processing: {str(e)}", 'error')
+            
         return redirect(url_for('upload'))
+
+    # 3. Handle GET Request: Load interface data
+    access_label = "Guest"
+    try:
+        response = requests.get(f"{BACKEND_URL}/api/access-label/{role}", timeout=2)
+        if response.status_code == 200:
+            access_label = response.json().get('label', 'Guest')
+    except requests.exceptions.RequestException:
+        pass # Graceful degradation if label service is down
 
     return render_template(
         'upload.html',
         allowed_categories=allowed_categories,
         role=role,
-        access_label=get_access_label(role),
-        # categories=get_allowed_categories(role):
+        access_label=access_label
     )
-
 
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
@@ -333,225 +555,104 @@ def admin_files():
     if not is_admin():
         return redirect(url_for('dashboard'))
 
+    # 1. Handle POST Actions (Admin Data Mutations)
     if request.method == 'POST':
         action = request.form.get('action')
-
+        
         if action == 'create_category':
             category_name = request.form.get('category_name', '').strip()
-            created_category = create_category(category_name)
-            if created_category:
-                log_audit(current_username(), 'create_category', category=created_category, details=f'Created category {created_category}')
-                flash_message(f'Category {created_category} created successfully.', 'success')
+            # API CALL: POST /api/categories
+            res = requests.post(f"{BACKEND_URL}/api/categories", json={"name": category_name})
+            if res.status_code == 200:
+                flash_message(f'Category {category_name} created.', 'success')
             else:
-                flash_message('Please provide a valid category name.', 'error')
-            return redirect(url_for('admin_files'))
+                flash_message('Could not create category.', 'error')
 
-        if action == 'delete_document':
+        elif action == 'delete_document':
             document_id = request.form.get('document_id', '').strip()
-            deleted_document = delete_document_by_id(document_id)
-            if deleted_document:
-                log_audit(
-                    current_username(),
-                    'delete',
-                    category=deleted_document['category'],
-                    filename=deleted_document['filename'],
-                    details=f'Deleted {deleted_document["filename"]}',
-                )
-                flash_message(f'Document {deleted_document["filename"]} deleted successfully.', 'success')
+            # API CALL: POST /api/delete-document
+            res = requests.post(f"{BACKEND_URL}/api/delete-document", json={"document_id": document_id})
+            if res.status_code == 200:
+                flash_message('Document deleted.', 'success')
             else:
-                flash_message('Document could not be deleted because it was not found.', 'error')
-            return redirect(url_for('admin_files'))
+                flash_message('Delete failed.', 'error')
 
-        if action == 'upload_document':
-            category = request.form.get('new_category', '').strip().lower() or request.form.get('category', '').strip().lower()
+        elif action == 'upload_document' or action == 'update_document':
             file = request.files.get('file')
+                
+            # Logic: If a new file is uploaded, use its name. 
+            # Otherwise, fall back to the text input field named 'filename'.
+            filename = secure_filename(file.filename) if file and file.filename else request.form.get('filename')
+            
+            payload = {
+                'category': request.form.get('category'),
+                'filename': filename, # <--- Now this will be 'Document.txt' instead of ''
+                'content': request.form.get('content'),
+                'actor': current_username(),
+                'action': 'update',
+                'previous_category': request.form.get('old_category'), # Ensure these are in your form
+                'previous_filename': request.form.get('old_filename')
+            }
+            res = save_text_document(**payload)
 
-            if not file or not file.filename:
-                flash_message('Choose a file before uploading.', 'error')
-                return redirect(url_for('admin_files'))
+            if res.get('success'):
+                flash_message('Document operation successful.', 'success')
+            else:
+                flash_message(f"Error: {res.get('error')}", 'error')
 
-            if not category:
-                flash_message('Choose a category for the upload.', 'error')
-                return redirect(url_for('admin_files'))
+        return redirect(url_for('admin_files'))
 
-            if category not in get_allowed_categories('admin'):
-                created_category = create_category(category)
-                if created_category:
-                    log_audit(current_username(), 'create_category', category=created_category, details=f'Auto-created category {created_category} during upload')
-                    category = created_category
+    # 2. Handle GET (Rendering)
+    try:
+        # Fetch data from API
+        res_docs = requests.get(f"{BACKEND_URL}/api/documents/admin", timeout=5)
+        documents = res_docs.json().get('documents', []) if res_docs.status_code == 200 else []
+        
+        edit_document = None
+        edit_id = request.args.get('edit_id')
+        if edit_id:
+            res_edit = requests.get(f"{BACKEND_URL}/api/document/{edit_id}")
+            if res_edit.status_code == 200:
+                edit_document = res_edit.json().get('document')
+    except requests.exceptions.RequestException:
+        documents, edit_document = [], None
+        flash_message("Backend unreachable.", "error")
 
-            filename = secure_filename(file.filename)
-            content = file.read().decode('utf-8', errors='ignore')
-            save_text_document(
-                category=category,
-                filename=filename,
-                content=content,
-                actor=current_username(),
-                action='upload',
-            )
-            flash_message('Upload complete. Database and TXT folder were updated.', 'success')
-            return redirect(url_for('admin_files'))
-
-        if action == 'update_document':
-            document_id = request.form.get('document_id', '').strip()
-            new_category = request.form.get('category', '').strip().lower()
-            new_filename = secure_filename(request.form.get('filename', '').strip())
-            new_content = request.form.get('content', '').strip()
-
-            document = get_document_by_id(document_id)
-            if not document:
-                flash_message('Document not found.', 'error')
-                return redirect(url_for('admin_files'))
-
-            if not new_category or not new_filename or not new_content:
-                flash_message('Category, filename, and content are required.', 'error')
-                return redirect(url_for('admin_files'))
-
-            if new_category not in get_allowed_categories('admin'):
-                create_category(new_category)
-                log_audit(current_username(), 'create_category', category=new_category, details=f'Auto-created category {new_category} during update')
-
-            save_text_document(
-                category=new_category,
-                filename=new_filename,
-                content=new_content,
-                actor=current_username(),
-                action='update',
-                previous_category=document['category'],
-                previous_filename=document['filename'],
-            )
-            flash_message('Document updated, database refreshed, and audit log saved.', 'success')
-            return redirect(url_for('admin_files'))
-
-    documents = get_documents('admin')
-    category_filter = request.args.get('category', '').strip().lower()
-    query_filter = request.args.get('q', '').strip()
-    filtered_documents = filter_documents(documents, category_filter, query_filter)
-    page = request.args.get('page', 1, type=int)
-    paginated_documents, page, total_pages, total_filtered = paginate_items(filtered_documents, page)
-
-    edit_document = None
-    edit_document_id = request.args.get('edit_id')
-    if edit_document_id:
-        edit_document = get_document_by_id(edit_document_id)
-    upload_categories = get_allowed_categories('admin')
-    
+    # Pagination/Filtering
+    cat_filter = request.args.get('category', '').strip().lower()
+    q_filter = request.args.get('q', '').strip()
+    filtered = filter_documents(documents, cat_filter, q_filter)
+    paginated, page, pages, total = paginate_items(filtered, request.args.get('page', 1, type=int))
 
     return render_template(
         'admin_files.html',
-        documents=paginated_documents,
-        username=current_username(),
+        documents=paginated,
         edit_document=edit_document,
         page=page,
-        total_pages=total_pages,
-        total_filtered=total_filtered,
-        category_filter=category_filter,
-        query_filter=query_filter,
-        upload_categories=upload_categories,
+        total_pages=pages,
+        total_filtered=total,
+        upload_categories=get_allowed_categories('admin')
     )
-
-# @app.route('/admin/users', methods=['GET', 'POST'])
-# def admin_users():
-#     if not is_admin():
-#         return redirect(url_for('dashboard'))
-
-#     all_categories = list_categories() or get_allowed_categories(admin)
-
-#     if request.method == 'POST':
-#         username = request.form.get('username', '').strip()
-#         password = request.form.get('password', '').strip()
-#         role = request.form.get('role', '').strip()
-#         allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
-#         action = request.form.get('action', 'create_user')
-
-#         if action == 'delete_user':
-#             user_id = request.form.get('user_id', '').strip()
-#             # user = get_user_by_id(user_id)
-#             if not user:
-#                 flash_message('User not found.', 'error')
-#                 return redirect(url_for('admin_users'))
-#             # delete_user_by_id(user_id)
-#             log_audit(current_username(), 'delete_user', details=f'Deleted user {user["username"]}')
-#             flash_message(f'User {user["username"]} deleted successfully.', 'success')
-#             return redirect(url_for('admin_users'))
-
-#         if action == 'update_user':
-#             user_id = request.form.get('user_id', '').strip()
-#             # user = get_user_by_id(user_id)
-#             if not user:
-#                 flash_message('User not found.', 'error')
-#                 return redirect(url_for('admin_users'))
-
-#             username = request.form.get('username', '').strip()
-#             role = request.form.get('role', '').strip()
-#             allowed_categories = parse_categories(request.form.getlist('allowed_categories'))
-
-#             if not username or not role:
-#                 flash_message('Username and role are required.', 'error')
-#                 return redirect(url_for('admin_users', edit_id=user_id))
-
-#             if role == 'admin':
-#                 allowed_categories = list_categories() or get_allowed_categories(admin)
-#             elif not allowed_categories:
-#                 flash_message('Select at least one category for the user.', 'error')
-#                 return redirect(url_for('admin_users', edit_id=user_id))
-
-#             # update_user(user_id, username, role, ','.join(allowed_categories))
-#             log_audit(current_username(), 'update_user', details=f'Updated user {username} with role {role} and categories {", ".join(allowed_categories)}')
-#             flash_message(f'User {username} updated successfully.', 'success')
-#             return redirect(url_for('admin_users'))
-
-#         if action == 'create_user':
-#             if not username or not password or not role:
-#                 flash_message('Username, password, and role are required.', 'error')
-#                 return redirect(url_for('admin_users'))
-
-#             if role == 'admin':
-#                 allowed_categories = list_categories() or get_allowed_categories(admin)
-#             elif not allowed_categories:
-#                 flash_message('Select at least one category for the user.', 'error')
-#                 return redirect(url_for('admin_users'))
-
-#             try:
-#                 # add_user(username, password, role, ','.join(allowed_categories))
-#                 log_audit(
-#                     actor=current_username(),
-#                     action='create_user',
-#                     details=f'Created user {username} with role {role} and categories {", ".join(allowed_categories)}',
-#                 )
-#                 flash_message(f'User {username} created successfully.', 'success')
-#             except Exception:
-#                 flash_message('That user could not be created. It may already exist.', 'error')
-
-#             return redirect(url_for('admin_users'))
-
-#         flash_message('Unknown admin user action.', 'error')
-#         return redirect(url_for('admin_users'))
-
-#     # users = list_users()
-#     edit_user = None
-#     edit_user_id = request.args.get('edit_id')
-#     if edit_user_id:
-#         # edit_user = get_user_by_id(edit_user_id)
-#     return render_template(
-#         'admin_users.html',
-#         users=users,
-#         username=current_username(),
-#         all_categories=all_categories,
-#         edit_user=edit_user,
-#     )
-
-
+    
 @app.route('/admin/audit')
 def admin_audit():
+    """Renders the audit log dashboard for administrators."""
     if not is_admin():
         return redirect(url_for('dashboard'))
+    # Fetch logs from the backend API
+    # Ensure list_audit_logs is imported or defined in this file
     logs = list_audit_logs(limit=200)
-    return render_template('admin_audit.html', logs=logs, username=current_username())
 
+    return render_template(
+        'admin_audit.html', 
+        logs=logs, 
+        username=current_username()
+    )
 
 if __name__ == '__main__':
     # Strat local Flast development server
     # specify port 5001, Default 5000
     # debug=True is for Auto-Reload and Interactive Debug
-    app.run(port=5001, debug=True)
+    # app.run(port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
+    bootstrap_database()
