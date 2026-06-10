@@ -62,6 +62,66 @@
     .scrollable-content { flex: 1; overflow-y: auto; }
     .loading { display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid var(--accent-blue); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .chat-bubble-user { background: var(--accent-blue); color: white; padding: 10px 16px; border-radius: 20px; border-bottom-right-radius: 4px; max-width: 80%; margin-left: auto; }
+    .chat-bubble-bot { background: #F1F5F9; color: var(--text-primary); padding: 10px 16px; border-radius: 20px; border-bottom-left-radius: 4px; max-width: 80%; }
+    .chat-history-container { max-height: 300px; overflow-y: auto; margin-bottom: 16px; }
+    
+    /* Structured message styling for bot responses */
+    .structured-message {
+      background: #F1F5F9;
+      border-radius: 20px;
+      border-bottom-left-radius: 6px;
+      padding: 16px 20px;
+      max-width: 85%;
+    }
+    .structured-section {
+      margin-bottom: 14px;
+    }
+    .structured-section strong {
+      color: var(--accent-blue);
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+    }
+    .structured-section p {
+      margin: 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: var(--text-primary);
+    }
+    .risk-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .risk-badge.low { background: #ECFDF5; color: #059669; }
+    .risk-badge.medium { background: #FFFBEB; color: #D97706; }
+    .risk-badge.high { background: #FEF2F2; color: #DC2626; }
+    .risk-badge.critical { background: #FEF2F2; color: #991B1B; }
+    .chat-sources {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-light);
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+    
+    /* Document list styling */
+    .document-item {
+      background: #F8FAFC;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      font-size: 0.8rem;
+      border-left: 3px solid var(--accent-blue);
+    }
+    .upload-status {
+      margin-top: 10px;
+      font-size: 0.75rem;
+    }
+    
     @media (max-width: 768px) { .floating-sidebar { left: 12px; width: 80px; } .sidebar-item span { display: none; } .main-content { margin-left: 110px; padding: 20px; max-width: calc(100% - 110px); } .dept-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -87,10 +147,10 @@
 </main>
 
 <script>
-  // API Configuration (leave empty to use mock data if backend not available)
-  const API_BASE_URL = ''; // Set to 'http://localhost:5000/api' when backend is running
+  // API Configuration
+  const API_BASE_URL = 'http://localhost:5001/api';
   
-  // Department data
+  // Hardcoded Repository Data (remains as is for Governance tab)
   const departmentDocs = {
     legal: { name: "Legal & Compliance", docs: ["Articles of Incorporation", "Corporate Bylaws", "Data Privacy Policies (GDPR/PDPR)", "Intellectual Property (IP) Policies", "Regulatory Compliance Registers"] },
     finance: { name: "Finance & Treasury", docs: ["Delegation of Authority (DoA) Matrix", "Anti-Money Laundering (AML) Policy", "Procurement and Purchasing Policies", "Internal Audit Frameworks", "Expense Reimbursement Rules"] },
@@ -100,263 +160,706 @@
     marketing: { name: "Marketing & Communications", docs: ["Social Media Policy", "Public Relations (PR) & Crisis Communication Guide", "Brand Guidelines & Trademark Usage", "Insider Trading / Market Disclosure Rules"] }
   };
 
-  // Mock data for when backend is not available
-  let auditLogs = [
-    { user: "admin@egip.com", action: "Uploaded governance document", module: "Governance", timestamp: new Date().toISOString(), details: "" },
-    { user: "compliance@egip.com", action: "Risk assessment updated", module: "Compliance", timestamp: new Date(Date.now() - 86400000).toISOString(), details: "" },
-    { user: "procurement@egip.com", action: "Supplier evaluation completed", module: "Procurement", timestamp: new Date(Date.now() - 172800000).toISOString(), details: "" }
-  ];
-
-  let governanceFiles = [
-    { name: "corporate_governance_framework.pdf", dept: "Legal", uploadedBy: "Board Secretariat", date: "2026-06-01", status: "Active" }
-  ];
-  let complianceFiles = [
-    { name: "data_privacy_policy_v3.pdf", dept: "Legal", uploadedBy: "Compliance Officer", date: "2026-05-20", status: "Active" }
-  ];
-  let procurementFiles = [
-    { name: "rfp_egip_platform.pdf", dept: "Procurement", uploadedBy: "Procurement Lead", date: "2026-05-15", status: "Active" }
-  ];
+  // Store documents fetched from backend
+  let backendDocuments = {
+    governance: [],
+    compliance: [],
+    procurement: []
+  };
+  
+  let auditLogs = [];
   let users = [
     { id: 1, name: "admin@egip.com", role: "Admin" },
     { id: 2, name: "compliance@egip.com", role: "Compliance Officer" },
     { id: 3, name: "procurement@egip.com", role: "Procurement Lead" }
   ];
+  
+  // Global persistent chat history for AI Studio
+  let globalChatHistory = [];
+  let homeRefreshInterval = null;
+  let currentHomeChart = null;
 
-  // Helper functions
-  function addAuditLog(user, action, module, details) {
-    auditLogs.unshift({ user, action, module, details, timestamp: new Date().toISOString() });
-    if (auditLogs.length > 100) auditLogs.pop();
+  function formatDateDDMMYYYY(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB');
   }
 
-  // API calls (with fallback to mock)
+  function addAuditLog(user, action, module, details) {
+    const newLog = { user, action, module, details, timestamp: new Date().toISOString() };
+    auditLogs.unshift(newLog);
+    if (auditLogs.length > 100) auditLogs.pop();
+    callAPI('/audit/log', 'POST', { user, action, module, details });
+  }
+
   async function callAPI(endpoint, method = 'GET', body = null) {
-    if (!API_BASE_URL) {
-      console.warn('API_BASE_URL not configured, using mock data');
-      return { error: 'API not configured' };
-    }
     try {
       const options = { method, headers: { 'Content-Type': 'application/json' } };
       if (body) options.body = JSON.stringify(body);
       const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.json();
     } catch (error) {
       console.warn('API call failed:', error);
-      return { error: error.message };
+      return { error: error.message, offline: true };
     }
+  }
+
+  // Fetch all documents from backend
+  async function fetchAllDocuments() {
+    const result = await callAPI('/documents');
+    if (!result.error && result.documents) {
+      // Clear existing arrays
+      backendDocuments = {
+        governance: [],
+        compliance: [],
+        procurement: []
+      };
+      
+      // Categorize documents
+      for (const doc of result.documents) {
+        if (doc.category === 'compliance' || doc.category === 'Compliance') {
+          backendDocuments.compliance.push(doc);
+        } else if (doc.category === 'procurement' || doc.category === 'Procurement') {
+          backendDocuments.procurement.push(doc);
+        } else {
+          backendDocuments.governance.push(doc);
+        }
+      }
+    }
+    return backendDocuments;
+  }
+
+  async function fetchRealTimeMetrics() {
+    const result = await callAPI('/dashboard/metrics');
+    if (!result.error) {
+      // Also fetch documents to keep them in sync
+      await fetchAllDocuments();
+    }
+    return result;
   }
 
   async function askAI(question) {
-    if (API_BASE_URL) {
-      const result = await callAPI('/ai/query', 'POST', { question });
-      if (!result.error) return result;
-    }
-    // Mock response
-    if (question.includes("RM75") || question.includes("approve")) {
-      return { answer: "Project Manager limit is RM50,000. RM75,000 requires Department Head approval.", key_findings: "Authority Matrix section 4.2", reasoning: "Based on Delegation of Authority policy", risk_level: "Low", recommendation: "Escalate to Department Head", confidence: 96, sources: [{ title: "governance_framework.txt", relevance: 98 }] };
-    } else if (question.includes("supplier")) {
-      return { answer: "Supplier Alpha is recommended with 94% confidence.", key_findings: "Meets all ISO 27001 requirements", reasoning: "Within budget, 7+ years experience", risk_level: "Low", recommendation: "Select Supplier Alpha", confidence: 94, sources: [{ title: "supplier_evaluation.pdf", relevance: 94 }] };
-    } else if (question.includes("High Risk")) {
-      return { answer: "High Risk incident: data breach >10k records or financial loss >RM500k.", key_findings: "Notify CISO within 2 hours", reasoning: "Incident Response Framework", risk_level: "High", recommendation: "Activate incident response", confidence: 92, sources: [{ title: "risk_framework.txt", relevance: 96 }] };
-    }
-    return { answer: "I can assist with governance, compliance, procurement, and risk queries.", key_findings: "Query needs more context", reasoning: "Please provide more specific question", risk_level: "Info", recommendation: "Refine your question", confidence: 85, sources: [] };
+    const result = await callAPI('/ai/query', 'POST', { question });
+    if (!result.error && result.answer) return result;
+    
+    return { 
+      answer: "Unable to process request. Ollama service is not running. Please ensure Ollama is installed and running with: ollama serve",
+      key_findings: "Service Unavailable",
+      reasoning: "The local Ollama AI model is not responding. Please check if Ollama is installed and running.",
+      risk_level: "Unknown",
+      recommendation: "Install Ollama from https://ollama.ai and run 'ollama pull llama2' then 'ollama serve'",
+      confidence: 0,
+      sources: []
+    };
   }
 
   // ========== PAGE RENDERERS ==========
-  function renderHome() {
-    setTimeout(() => {
-      const ctx = document.getElementById("homeChart");
-      if (ctx) new Chart(ctx, { type: 'line', data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [{ label: 'AI Queries', data: [18, 24, 32, 41, 57, 62, 49], borderColor: '#3B82F6', tension: 0.3, fill: true, backgroundColor: 'rgba(59,130,246,0.05)' }] } });
-    }, 100);
+  async function renderHome() {
+    const metrics = await callAPI('/dashboard/metrics');
+    const totalFiles = (metrics.governanceDocs || 0) + (metrics.complianceDocs || 0) + (metrics.procurementDocs || 0);
+    
     return `
       <div class="row g-4">
-        <div class="col-md-6 col-lg-3"><div class="premium-card"><div class="card-header-premium">Governance Overview</div><div class="display-4 fw-bold text-primary">87</div><div>Total Documents</div><div class="mt-3"><small>Authority: PM(RM50k) → DH(RM250k)</small></div></div></div>
-        <div class="col-md-6 col-lg-3"><div class="premium-card"><div class="card-header-premium">Compliance Overview</div><div class="d-flex gap-1 flex-wrap"><span class="risk-low">Low 14</span><span class="risk-medium">Medium 9</span><span class="risk-high">High 5</span><span class="risk-critical">Critical 2</span></div><div class="mt-3">Score: 86%<div class="progress mt-1"><div class="progress-bar bg-success" style="width:86%"></div></div></div></div></div>
-        <div class="col-md-6 col-lg-3"><div class="premium-card"><div class="card-header-premium">Procurement Overview</div><div><strong>Active Projects:</strong> 3</div><div><strong>Suppliers Review:</strong> 8</div><div class="mt-3 bg-light rounded-3 p-2"><strong>Recommended:</strong> Supplier Alpha (94%)</div></div></div>
-        <div class="col-md-6 col-lg-3"><div class="premium-card"><div class="card-header-premium">AI Analytics</div><div class="display-4 fw-bold">142</div><div>Queries Today</div><div>Confidence: 92% | Response: 1.4s</div></div></div>
-        <div class="col-md-12"><div class="premium-card"><div class="card-header-premium">AI Query Trends</div><canvas id="homeChart" height="200"></canvas></div></div>
+        <div class="col-md-6 col-lg-3">
+          <div class="premium-card">
+            <div class="card-header-premium">Total Documents</div>
+            <div class="display-1 fw-bold text-primary" style="font-size: 3rem;">${totalFiles}</div>
+            <div>Total Files Across All Folders</div>
+            <div class="mt-3 small text-muted">Governance: ${metrics.governanceDocs || 0} | Compliance: ${metrics.complianceDocs || 0} | Procurement: ${metrics.procurementDocs || 0}</div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <div class="premium-card">
+            <div class="card-header-premium">Compliance Overview</div>
+            <div class="d-flex gap-1 flex-wrap">
+              <span class="risk-low">Low ${metrics.lowRisk || 0}</span>
+              <span class="risk-medium">Medium ${metrics.mediumRisk || 0}</span>
+              <span class="risk-high">High ${metrics.highRisk || 0}</span>
+              <span class="risk-critical">Critical ${metrics.criticalRisk || 0}</span>
+            </div>
+            <div class="mt-3">Score: ${metrics.complianceScore || 0}%<div class="progress mt-1"><div class="progress-bar bg-success" style="width:${metrics.complianceScore || 0}%"></div></div></div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <div class="premium-card">
+            <div class="card-header-premium">Procurement Overview</div>
+            <div><strong>Active Projects:</strong> ${metrics.activeProjects || 0}</div>
+            <div><strong>Suppliers Review:</strong> ${metrics.suppliersReview || 0}</div>
+            <div class="mt-3 bg-light rounded-3 p-2"><strong>Recommended:</strong> ${metrics.recommendedSupplier || 'None'} (${metrics.confidence || 0}%)</div>
+          </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <div class="premium-card">
+            <div class="card-header-premium">AI Analytics</div>
+            <div class="display-4 fw-bold">${metrics.aiQueriesToday || 0}</div>
+            <div>Queries Today</div>
+            <div>Confidence: ${metrics.avgConfidence || 0}% | Response: ${metrics.avgResponseTime || 0}s</div>
+          </div>
+        </div>
+        <div class="col-md-12">
+          <div class="premium-card">
+            <div class="card-header-premium">AI Query Trends</div>
+            <canvas id="homeChart" height="200"></canvas>
+          </div>
+        </div>
       </div>
     `;
   }
 
-  function renderFolder() {
+  function initHomeChart() {
+    const canvas = document.getElementById("homeChart");
+    if (!canvas) return;
+    if (currentHomeChart) {
+      currentHomeChart.destroy();
+      currentHomeChart = null;
+    }
+    
+    // Fetch real-time trend data for the chart
+    callAPI('/dashboard/metrics').then(metrics => {
+      currentHomeChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: metrics.trendLabels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+          datasets: [{ 
+            label: 'AI Queries', 
+            data: metrics.trendData || [0, 0, 0, 0, 0, 0, 0], 
+            borderColor: '#3B82F6', 
+            tension: 0.3, 
+            fill: true, 
+            backgroundColor: 'rgba(59,130,246,0.05)' 
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true
+        }
+      });
+    });
+  }
+
+  async function renderFolder() {
+    // Fetch latest documents from backend
+    await fetchAllDocuments();
+    
+    const totalGov = backendDocuments.governance.length;
+    const totalComp = backendDocuments.compliance.length;
+    const totalProc = backendDocuments.procurement.length;
+    
     return `
       <div class="custom-tabs">
-        <button class="tab-btn active" data-tab="governance">Governance</button>
-        <button class="tab-btn" data-tab="compliance">Compliance</button>
-        <button class="tab-btn" data-tab="procurement">Procurement</button>
+        <button class="tab-btn active" data-tab="governance">Governance (${totalGov})</button>
+        <button class="tab-btn" data-tab="compliance">Compliance (${totalComp})</button>
+        <button class="tab-btn" data-tab="procurement">Procurement (${totalProc})</button>
       </div>
       <div id="tabContent">
-        ${renderGovernanceTab()}
+        ${await renderGovernanceTab()}
       </div>
     `;
   }
 
-  function renderGovernanceTab() {
-    return `<div class="row g-4"><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Upload Governance Documents</div><div class="upload-zone" id="govUploadZone"><i class="bi bi-cloud-upload fs-1"></i><p class="mt-2">Drag & drop or click to upload</p><small>PDF, DOCX, TXT</small><input type="file" id="govFileInput" style="display:none" accept=".pdf,.docx,.txt"></div><div id="govStatus" class="mt-2 small text-success"></div></div></div><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Repository</div><div class="scrollable-content"><div class="dept-grid">${Object.values(departmentDocs).map(dept => `<div class="dept-card"><h6>${dept.name}</h6><ul>${dept.docs.map(doc => `<li>${doc}</li>`).join('')}</ul></div>`).join('')}</div></div></div></div></div>`;
+  async function renderGovernanceTab() {
+    // Hardcoded Repository for Governance
+    const hardcodedRepoHtml = Object.values(departmentDocs).map(dept => `
+      <div class="dept-card">
+        <h6>${dept.name}</h6>
+        <ul>
+          ${dept.docs.map(doc => `<li>${doc}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('');
+    
+    return `<div class="row g-4">
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Upload Governance Documents</div>
+          <div class="upload-zone" id="govUploadZone">
+            <i class="bi bi-cloud-upload fs-1"></i>
+            <p class="mt-2">Drag & drop or click to upload</p>
+            <small>PDF, DOCX, TXT</small>
+            <input type="file" id="govFileInput" style="display:none" accept=".pdf,.docx,.txt">
+          </div>
+          <div id="govStatus" class="upload-status text-success"></div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Repository</div>
+          <div class="scrollable-content">
+            <div class="dept-grid">
+              ${hardcodedRepoHtml}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
   }
 
-  function renderComplianceTab() {
-    return `<div class="row g-4"><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Upload Compliance Documents</div><div class="upload-zone" id="compUploadZone"><i class="bi bi-cloud-upload fs-1"></i><p class="mt-2">Upload policies, risk assessments</p><input type="file" id="compFileInput" style="display:none"></div><div id="compStatus" class="mt-2 small text-success"></div></div></div><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Compliance Overview</div><div class="mb-3"><span class="risk-low">Low 14</span> <span class="risk-medium">Medium 9</span> <span class="risk-high">High 5</span> <span class="risk-critical">Critical 2</span></div><div><strong>Policies:</strong> Data Privacy, Incident Response, Whistleblower</div><div><strong>Score:</strong> 86%</div><div class="progress mt-2"><div class="progress-bar bg-success" style="width:86%"></div></div><div class="mt-3"><strong>Documents:</strong><div id="compFileList">${complianceFiles.map(f => `<div class="source-item small">${f.name}</div>`).join('')}</div></div></div></div></div>`;
+  async function renderComplianceTab() {
+    // Real-time documents from backend for Compliance
+    const complianceDocsList = backendDocuments.compliance.map(doc => 
+      `<div class="document-item">
+        <i class="bi bi-file-text me-2"></i>
+        ${doc.filename || doc.name}
+        <small class="text-muted ms-2">${doc.updated_at ? doc.updated_at.slice(0,10) : new Date().toISOString().slice(0,10)}</small>
+      </div>`
+    ).join('');
+    
+    return `<div class="row g-4">
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Upload Compliance Documents</div>
+          <div class="upload-zone" id="compUploadZone">
+            <i class="bi bi-cloud-upload fs-1"></i>
+            <p class="mt-2">Upload policies, risk assessments</p>
+            <input type="file" id="compFileInput" style="display:none">
+          </div>
+          <div id="compStatus" class="upload-status text-success"></div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Compliance Documents (${backendDocuments.compliance.length})</div>
+          <div class="scrollable-content" style="max-height: 400px; overflow-y: auto;">
+            ${complianceDocsList || '<div class="text-muted text-center">No documents uploaded yet</div>'}
+          </div>
+        </div>
+      </div>
+    </div>`;
   }
 
-  function renderProcurementTab() {
-    return `<div class="row g-4"><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Upload Procurement Documents</div><div class="upload-zone" id="procUploadZone"><i class="bi bi-cloud-upload fs-1"></i><p class="mt-2">RFPs, contracts, evaluations</p><input type="file" id="procFileInput" style="display:none"></div><div id="procStatus" class="mt-2 small text-success"></div></div></div><div class="col-md-6"><div class="premium-card"><div class="card-header-premium">Procurement Intelligence</div><div><strong>Active Project:</strong> EGIP Platform</div><div><strong>Budget:</strong> RM 1,200,000</div><div><strong>Recommended:</strong> Supplier Alpha (94%)</div><div><strong>Requirements:</strong> ISO 27001, 5+ years, 24/7 Support</div><div class="mt-3"><strong>Documents:</strong><div id="procFileList">${procurementFiles.map(f => `<div class="source-item small">${f.name}</div>`).join('')}</div></div></div></div></div>`;
+  async function renderProcurementTab() {
+    // Real-time documents from backend for Procurement
+    const procurementDocsList = backendDocuments.procurement.map(doc => 
+      `<div class="document-item">
+        <i class="bi bi-file-text me-2"></i>
+        ${doc.filename || doc.name}
+        <small class="text-muted ms-2">${doc.updated_at ? doc.updated_at.slice(0,10) : new Date().toISOString().slice(0,10)}</small>
+      </div>`
+    ).join('');
+    
+    return `<div class="row g-4">
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Upload Procurement Documents</div>
+          <div class="upload-zone" id="procUploadZone">
+            <i class="bi bi-cloud-upload fs-1"></i>
+            <p class="mt-2">RFPs, contracts, evaluations</p>
+            <input type="file" id="procFileInput" style="display:none">
+          </div>
+          <div id="procStatus" class="upload-status text-success"></div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="premium-card">
+          <div class="card-header-premium">Procurement Documents (${backendDocuments.procurement.length})</div>
+          <div class="scrollable-content" style="max-height: 400px; overflow-y: auto;">
+            ${procurementDocsList || '<div class="text-muted text-center">No documents uploaded yet</div>'}
+          </div>
+        </div>
+      </div>
+    </div>`;
   }
 
   function renderAIAssistant() {
     return `
-      <div class="premium-card mb-4"><h5 class="fw-semibold">Enterprise Intelligence Workspace</h5><div class="input-group mt-3"><input type="text" id="aiQuestion" class="form-control" placeholder="Ask about governance, compliance, suppliers, ESG, procurement, risk, approvals..."><button class="btn btn-primary" id="askBtn">Analyze</button></div></div>
-      <div class="ai-columns">
-        <div class="ai-panel"><h6><i class="bi bi-folder2-open me-2"></i>Sources Retrieved</h6><div id="sourcesList"><div class="text-secondary">Ask a question to see relevant sources...</div></div></div>
-        <div class="ai-panel"><h6><i class="bi bi-cpu me-2"></i>AI Analysis</h6><div id="analysisContent"><div class="text-secondary">Ask a question to get AI analysis...</div></div></div>
-        <div class="ai-panel"><h6><i class="bi bi-bar-chart me-2"></i>Decision Summary</h6><div id="decisionSummary"><div class="text-secondary">AI response will appear here...</div></div></div>
+      <div class="premium-card mb-4" style="padding:0; border:none; background:transparent; box-shadow:none; min-height:auto;">
+        <div class="row g-4">
+          <div class="col-lg-7">
+            <div class="chat-container" style="background: white; border-radius: 24px; border: 1px solid var(--border-light); height: 600px; display: flex; flex-direction: column; overflow: hidden;">
+              <div class="chat-header p-3 border-bottom" style="background: #FAFCFE;">
+                <h6 class="mb-0"><i class="bi bi-robot me-2"></i>EGIP AI Assistant</h6>
+              </div>
+              <div class="chat-messages" id="chatMessages" style="flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:16px;">
+                <div class="text-secondary text-center mt-4">Ask a question to start the conversation...</div>
+              </div>
+              <div class="chat-input-area" style="padding:16px; border-top:1px solid var(--border-light); background:white;">
+                <div class="input-group">
+                  <input type="text" id="aiQuestion" class="form-control" placeholder="Ask about governance, compliance, suppliers, ESG, procurement, risk, approvals...">
+                  <button class="btn btn-primary" id="askBtn"><i class="bi bi-send"></i> Analyze</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="right-panel" style="background: white; border-radius: 24px; border: 1px solid var(--border-light); padding: 20px; display: flex; flex-direction: column; gap: 20px; height: 600px; overflow-y: auto;">
+              <div class="info-card" style="background: #F8FAFC; border-radius: 20px; padding: 16px;">
+                <h6 style="font-size:0.85rem; font-weight:600; margin-bottom:12px;"><i class="bi bi-bar-chart me-2"></i>Decision Summary</h6>
+                <div id="decisionSummary"><div class="text-secondary">AI response will appear here...</div></div>
+              </div>
+              <div class="info-card" style="background: #F8FAFC; border-radius: 20px; padding: 16px;">
+                <h6 style="font-size:0.85rem; font-weight:600; margin-bottom:12px;"><i class="bi bi-folder2-open me-2"></i>Sources Retrieved</h6>
+                <div id="sourcesList"><div class="text-secondary">Ask a question to see relevant sources...</div></div>
+              </div>
+              <div class="info-card" style="background: #F8FAFC; border-radius: 20px; padding: 16px;">
+                <h6 style="font-size:0.85rem; font-weight:600; margin-bottom:12px;"><i class="bi bi-question-circle me-2"></i>Suggested Questions</h6>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="Who can approve a RM50,000 project?">Who can approve RM50k?</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="Can a Project Manager approve RM75,000?">PM approve RM75k?</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="Which supplier best fulfills Project A requirements?">Best supplier</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="What is considered a High Risk incident?">High Risk definition</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="What are the ESG targets for 2026?">ESG targets 2026</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="What is the Delegation of Authority limit?">DoA limit</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="What ISO certifications are required?">ISO requirements</button>
+                  <button class="btn suggest-btn suggest" style="font-size:0.7rem; padding:6px 12px; border-radius:20px; background:white; border:1px solid var(--border-light);" data-q="How to report a compliance violation?">Report violation</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="mt-4 premium-card"><h6>Suggested Questions</h6><div class="d-flex gap-2 flex-wrap mt-2">
-        <button class="btn btn-outline-secondary btn-sm suggest" data-q="Can a Project Manager approve RM75,000?">Project Manager approval RM75k</button>
-        <button class="btn btn-outline-secondary btn-sm suggest" data-q="Which supplier best fulfills Project A requirements?">Best supplier for Project A</button>
-        <button class="btn btn-outline-secondary btn-sm suggest" data-q="What is High Risk according to policy?">High Risk definition</button>
-      </div></div>
     `;
   }
 
   function renderAdmin() {
     return `
       <div class="ai-columns">
-        <div class="ai-panel"><h5><i class="bi bi-people me-2"></i>User Management</h5><button class="btn btn-primary btn-sm mb-3" id="addUserBtn">+ Add User</button><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Role</th><th>Action</th></tr></thead><tbody id="userTableBody">${users.map(u => `<tr><td>${u.name}</td><td>${u.role}</td><td><button class="btn btn-sm btn-outline-danger delete-user" data-id="${u.id}">Delete</button></td></tr>`).join('')}</tbody></table></div></div>
-        <div class="ai-panel"><h5><i class="bi bi-journal-text me-2"></i>Audit Logs</h5><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Timestamp</th></tr></thead><tbody id="auditTableBody">${auditLogs.slice(0, 10).map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.module}</td><td>${new Date(log.timestamp).toLocaleString()}</td></tr>`).join('')}</tbody><tr></div></div>
-        <div class="ai-panel"><h5><i class="bi bi-database me-2"></i>Knowledge Management</h5><div><strong>Total Documents:</strong> ${governanceFiles.length + complianceFiles.length + procurementFiles.length}</div><div><strong>Last Upload:</strong> ${new Date().toLocaleDateString()}</div><div><strong>Storage Used:</strong> 124 MB / 5 GB</div></div>
-        <div class="ai-panel"><h5><i class="bi bi-gear me-2"></i>System Configuration</h5><div><strong>AI Model:</strong> Gemini 1.5 Pro / Ollama</div><div><strong>Vector DB:</strong> ChromaDB (Connected)</div><div><strong>Status:</strong> <span class="text-success">● Operational</span></div></div>
+        <div class="ai-panel"><h5><i class="bi bi-people me-2"></i>User Management</h5><button class="btn btn-primary btn-sm mb-3" id="addUserBtn">+ Add User</button><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Role</th><th>Action</th></tr></thead><tbody id="userTableBody">${users.map(u => `<tr><td>${u.name}</td><td>${u.role}</td><td><button class="btn btn-sm btn-outline-danger delete-user" data-id="${u.id}">Delete</button></td>`).join('')}</tbody></table></div></div>
+        <div class="ai-panel"><h5><i class="bi bi-journal-text me-2"></i>User Actions & Timestamp</h5><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Timestamp (DD/MM/YYYY)</th></tr></thead><tbody id="auditTableBody">${auditLogs.slice(0, 10).map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.module || '-'}</td><td>${formatDateDDMMYYYY(log.timestamp)}</td>`).join('')}</tbody></table></div></div>
+        <div class="ai-panel"><h5><i class="bi bi-database me-2"></i>Knowledge Management</h5><div><strong>Total Documents:</strong> <span id="totalDocsDisplay">${backendDocuments.governance.length + backendDocuments.compliance.length + backendDocuments.procurement.length}</span></div><div><strong>Last Upload:</strong> ${new Date().toLocaleDateString('en-GB')}</div></div>
+        <div class="ai-panel"><h5><i class="bi bi-gear me-2"></i>System Configuration</h5><div><strong>AI Model:</strong> Ollama (Gemma2/Llama2)</div><div><strong>Backend:</strong> ${API_BASE_URL}</div><div><strong>Database:</strong> SQLite Connected</div></div>
       </div>
     `;
   }
 
-  // ========== PAGE LOADING WITH EVENT HANDLERS ==========
+  // ========== PAGE LOADING ==========
   let currentPage = "home";
 
-  function loadPage(page) {
+  async function loadPage(page) {
     currentPage = page;
     let html = "";
-    if (page === "home") html = renderHome();
-    else if (page === "folder") html = renderFolder();
-    else if (page === "ai-assistant") html = renderAIAssistant();
-    else html = renderAdmin();
-    document.getElementById("dynamicPage").innerHTML = html;
-
-    // Attach event handlers based on page
-    if (page === "folder") {
-      // Tab switching
-      document.querySelectorAll(".tab-btn").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-          btn.classList.add("active");
-          const tab = btn.dataset.tab;
-          if (tab === "governance") document.getElementById("tabContent").innerHTML = renderGovernanceTab();
-          else if (tab === "compliance") document.getElementById("tabContent").innerHTML = renderComplianceTab();
-          else document.getElementById("tabContent").innerHTML = renderProcurementTab();
-          attachUploadEvents();
+    if (page === "home") {
+      if (homeRefreshInterval) clearInterval(homeRefreshInterval);
+      html = await renderHome();
+      document.getElementById("dynamicPage").innerHTML = html;
+      initHomeChart();
+      homeRefreshInterval = setInterval(async () => {
+        if (currentPage === "home") {
+          const freshHtml = await renderHome();
+          document.getElementById("dynamicPage").innerHTML = freshHtml;
+          initHomeChart();
+        }
+      }, 10000);
+    } else {
+      if (homeRefreshInterval) {
+        clearInterval(homeRefreshInterval);
+        homeRefreshInterval = null;
+      }
+      if (page === "folder") {
+        html = await renderFolder();
+        document.getElementById("dynamicPage").innerHTML = html;
+        
+        document.querySelectorAll(".tab-btn").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            const tab = btn.dataset.tab;
+            if (tab === "governance") {
+              document.getElementById("tabContent").innerHTML = await renderGovernanceTab();
+            } else if (tab === "compliance") {
+              document.getElementById("tabContent").innerHTML = await renderComplianceTab();
+            } else {
+              document.getElementById("tabContent").innerHTML = await renderProcurementTab();
+            }
+            attachUploadEvents();
+          });
         });
-      });
-      attachUploadEvents();
+        attachUploadEvents();
+      } else if (page === "ai-assistant") {
+        html = renderAIAssistant();
+        document.getElementById("dynamicPage").innerHTML = html;
+        setupAIAssistant();
+      } else {
+        html = renderAdmin();
+        document.getElementById("dynamicPage").innerHTML = html;
+        setupAdmin();
+      }
+    }
+  }
+  
+  function setupAIAssistant() {
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
     
-    if (page === "ai-assistant") {
-      const askBtn = document.getElementById("askBtn");
-      const aiQuestion = document.getElementById("aiQuestion");
-      
-      askBtn?.addEventListener("click", async () => {
-        const question = aiQuestion.value;
-        if (!question) return;
-        
-        document.getElementById("analysisContent").innerHTML = '<div class="loading"></div> Analyzing...';
-        document.getElementById("sourcesList").innerHTML = '<div class="loading"></div> Retrieving sources...';
-        
-        const response = await askAI(question);
-        
-        document.getElementById("analysisContent").innerHTML = `
-          <p><strong>Key Findings:</strong> ${response.key_findings || response.answer.substring(0, 100)}</p>
-          <p><strong>Reasoning:</strong> ${response.reasoning || 'Based on governance frameworks'}</p>
-          <p><strong>Risk Assessment:</strong> ${response.risk_level || 'Low'}</p>
-          <p><strong>Recommendation:</strong> ${response.recommendation || response.answer.substring(0, 80)}</p>
-        `;
-        
-        document.getElementById("sourcesList").innerHTML = (response.sources || []).map(s => 
-          `<div class="source-item">${s.title || s} <span class="badge bg-primary float-end">${s.relevance || 92}%</span></div>`
-        ).join('');
-        
-        document.getElementById("decisionSummary").innerHTML = `
-          <div><strong>Confidence:</strong> ${response.confidence || 92}%</div>
-          <div><strong>Risk Level:</strong> ${response.risk_level || 'Low'}</div>
-          <div><strong>Recommendation:</strong> ${response.recommendation || 'Proceed'}</div>
-          <div><strong>Response Time:</strong> 1.3s</div>
-          <div><strong>Sources:</strong> ${(response.sources || []).length}</div>
-        `;
-        
-        addAuditLog('user@egip.com', `AI Query: ${question.substring(0, 50)}`, 'AI Assistant', `Confidence: ${response.confidence || 92}%`);
-      });
-      
-      document.querySelectorAll(".suggest").forEach(btn => {
-        btn.addEventListener("click", () => {
-          aiQuestion.value = btn.dataset.q;
-          askBtn.click();
-        });
-      });
+    function getRiskBadgeClass(riskLevel) {
+      const level = (riskLevel || 'Low').toLowerCase();
+      if (level === 'critical') return 'critical';
+      if (level === 'high') return 'high';
+      if (level === 'medium') return 'medium';
+      return 'low';
     }
     
-    if (page === "admin") {
-      document.getElementById("addUserBtn")?.addEventListener("click", () => {
-        const name = prompt("Enter email:");
-        if (name) {
-          users.push({ id: users.length + 1, name: name, role: "User" });
-          loadPage("admin");
-          addAuditLog("admin@egip.com", `Added user: ${name}`, "Admin", "");
+    function formatStructuredBotResponse(response) {
+      const keyFindings = response.key_findings || response.answer?.substring(0, 300) || 'Analysis complete';
+      const reasoning = response.reasoning || 'Based on governance frameworks and policy documents';
+      const riskLevel = response.risk_level || 'Low';
+      const recommendation = response.recommendation || response.answer?.substring(0, 200) || 'Refer to documents for full details';
+      const confidence = (response.confidence !== undefined && response.confidence !== null) ? response.confidence : 0;
+      const sources = response.sources || [];
+      const riskBadgeClass = getRiskBadgeClass(riskLevel);
+      
+      return `
+        <div class="structured-message">
+          <div class="structured-section">
+            <strong>Key Findings:</strong>
+            <p>${escapeHtml(keyFindings)}</p>
+          </div>
+          <div class="structured-section">
+            <strong>Reasoning:</strong>
+            <p>${escapeHtml(reasoning)}</p>
+          </div>
+          <div class="structured-section">
+            <strong>Risk Assessment:</strong>
+            <p><span class="risk-badge ${riskBadgeClass}">${riskLevel}</span></p>
+          </div>
+          <div class="structured-section">
+            <strong>Recommendation:</strong>
+            <p>${escapeHtml(recommendation)}</p>
+          </div>
+          <div class="structured-section">
+            <strong>Confidence Score:</strong>
+            <div class="progress mt-1" style="height:6px;">
+              <div class="progress-bar bg-success" style="width: ${confidence}%"></div>
+            </div>
+            <small class="text-muted">${confidence}%</small>
+          </div>
+          ${sources.length > 0 ? `
+            <div class="chat-sources">
+              <strong>Sources:</strong> ${sources.map(s => typeof s === 'string' ? s : s.title).join(', ')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+    
+    async function handleAsk() {
+      const questionInput = document.getElementById('aiQuestion');
+      const question = questionInput.value.trim();
+      if (!question) return;
+      questionInput.value = '';
+      
+      globalChatHistory.push({ role: 'user', content: question });
+      renderMessages();
+      
+      document.getElementById('sourcesList').innerHTML = '<div class="loading"></div> Retrieving sources...';
+      document.getElementById('decisionSummary').innerHTML = '<div class="loading"></div> Generating summary...';
+      
+      const response = await askAI(question);
+      
+      if (response.sources && response.sources.length > 0) {
+        document.getElementById('sourcesList').innerHTML = response.sources.map(s => `
+          <div class="source-item">
+            <i class="bi bi-file-text me-2"></i>
+            <strong>${escapeHtml(s.title || s)}</strong>
+            <span class="badge bg-primary float-end">${s.relevance || 0}% relevance</span>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('sourcesList').innerHTML = '<div class="text-secondary">No specific sources retrieved for this query</div>';
+      }
+      
+      const dynamicConfidence = (response.confidence !== undefined && response.confidence !== null) ? response.confidence : 0;
+      const dynamicResponseTime = response.response_time || '0';
+      
+      document.getElementById('decisionSummary').innerHTML = `
+        <div class="mb-2">
+          <strong>Confidence Score:</strong>
+          <div class="progress mt-1" style="height:8px;">
+            <div class="progress-bar bg-success" style="width: ${dynamicConfidence}%"></div>
+          </div>
+          <span class="small">${dynamicConfidence}%</span>
+        </div>
+        <div class="mb-2">
+          <strong>Risk Level:</strong> 
+          <span class="risk-badge ${getRiskBadgeClass(response.risk_level)}">${response.risk_level || 'Unknown'}</span>
+        </div>
+        <div class="mb-2">
+          <strong>Recommendation:</strong><br>
+          <small>${escapeHtml(response.recommendation || 'No recommendation available')}</small>
+        </div>
+        <div class="mb-2">
+          <strong>Response Time:</strong> ${dynamicResponseTime}s
+        </div>
+        <div>
+          <strong>Sources Analyzed:</strong> ${response.sources?.length || 0}
+        </div>
+      `;
+      
+      const formattedBotMessage = formatStructuredBotResponse(response);
+      globalChatHistory.push({ 
+        role: 'bot', 
+        content: formattedBotMessage,
+        isStructured: true
+      });
+      
+      renderMessages();
+      addAuditLog('user@egip.com', `AI Query: ${question.substring(0, 50)}`, 'AI Studio', `Confidence: ${dynamicConfidence}% | Response Time: ${dynamicResponseTime}s`);
+    }
+    
+    function renderMessages() {
+      const container = document.getElementById('chatMessages');
+      if (!container) return;
+      
+      if (globalChatHistory.length === 0) {
+        container.innerHTML = '<div class="text-secondary text-center mt-4">Ask a question to start the conversation...</div>';
+        return;
+      }
+      
+      const messagesHtml = globalChatHistory.map(msg => {
+        if (msg.role === 'user') {
+          return `
+            <div style="display:flex; justify-content:flex-end;">
+              <div style="background:var(--accent-blue); color:white; padding:12px 18px; border-radius:22px; border-bottom-right-radius:6px; max-width:85%; word-wrap:break-word;">
+                ${escapeHtml(msg.content)}
+              </div>
+            </div>
+          `;
+        } else {
+          if (msg.isStructured) {
+            return `<div style="display:flex; justify-content:flex-start;">${msg.content}</div>`;
+          } else {
+            return `
+              <div style="display:flex; justify-content:flex-start;">
+                <div style="background:#F1F5F9; padding:12px 18px; border-radius:22px; border-bottom-left-radius:6px; max-width:85%; word-wrap:break-word;">
+                  ${escapeHtml(msg.content)}
+                </div>
+              </div>
+            `;
+          }
+        }
+      }).join('');
+      
+      container.innerHTML = messagesHtml;
+      container.scrollTop = container.scrollHeight;
+    }
+    
+    document.getElementById('askBtn')?.addEventListener('click', handleAsk);
+    document.getElementById('aiQuestion')?.addEventListener('keypress', (e) => { 
+      if(e.key === 'Enter') handleAsk(); 
+    });
+    document.querySelectorAll('.suggest').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const qInput = document.getElementById('aiQuestion');
+        if(qInput) { 
+          qInput.value = btn.dataset.q; 
+          handleAsk(); 
         }
       });
-      document.querySelectorAll(".delete-user").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          const id = parseInt(btn.dataset.id);
-          users = users.filter(u => u.id !== id);
-          loadPage("admin");
-          addAuditLog("admin@egip.com", `Deleted user ID: ${id}`, "Admin", "");
-        });
+    });
+    renderMessages();
+  }
+  
+  function setupAdmin() {
+    document.getElementById("addUserBtn")?.addEventListener("click", () => {
+      const name = prompt("Enter email:");
+      if (name) {
+        users.push({ id: users.length + 1, name: name, role: "User" });
+        loadPage("admin");
+        addAuditLog("admin@egip.com", `Added user: ${name}`, "Admin", "");
+      }
+    });
+    document.querySelectorAll(".delete-user").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = parseInt(btn.dataset.id);
+        users = users.filter(u => u.id !== id);
+        loadPage("admin");
+        addAuditLog("admin@egip.com", `Deleted user ID: ${id}`, "Admin", "");
       });
-    }
+    });
   }
 
   function attachUploadEvents() {
+    // Governance Upload
     const govZone = document.getElementById("govUploadZone");
     if (govZone) {
       govZone.onclick = () => document.getElementById("govFileInput")?.click();
-      document.getElementById("govFileInput")?.addEventListener("change", (e) => {
+      document.getElementById("govFileInput")?.addEventListener("change", async (e) => {
         if (e.target.files[0]) {
-          governanceFiles.push({ name: e.target.files[0].name, dept: "Legal", uploadedBy: "User", date: new Date().toISOString().slice(0,10), status: "Pending" });
-          loadPage("folder");
-          addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Governance", "");
+          // Call backend to save document
+          const formData = new FormData();
+          formData.append('file', e.target.files[0]);
+          formData.append('category', 'governance');
+          
+          try {
+            await fetch(`${API_BASE_URL}/documents/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            document.getElementById("govStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
+            setTimeout(() => { document.getElementById("govStatus").innerHTML = ""; }, 3000);
+            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Governance", "");
+            // Refresh folder view
+            if (currentPage === "folder") {
+              loadPage("folder");
+            }
+          } catch (error) {
+            console.error('Upload failed:', error);
+            document.getElementById("govStatus").innerHTML = `<i class="bi bi-exclamation-circle"></i> Upload failed`;
+          }
         }
       });
     }
+    
+    // Compliance Upload
     const compZone = document.getElementById("compUploadZone");
     if (compZone) {
       compZone.onclick = () => document.getElementById("compFileInput")?.click();
-      document.getElementById("compFileInput")?.addEventListener("change", (e) => {
+      document.getElementById("compFileInput")?.addEventListener("change", async (e) => {
         if (e.target.files[0]) {
-          complianceFiles.push({ name: e.target.files[0].name, dept: "Legal", uploadedBy: "User", date: new Date().toISOString().slice(0,10), status: "Active" });
-          loadPage("folder");
+          const formData = new FormData();
+          formData.append('file', e.target.files[0]);
+          formData.append('category', 'compliance');
+          
+          try {
+            await fetch(`${API_BASE_URL}/documents/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            document.getElementById("compStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
+            setTimeout(() => { document.getElementById("compStatus").innerHTML = ""; }, 3000);
+            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Compliance", "");
+            if (currentPage === "folder") {
+              loadPage("folder");
+            }
+          } catch (error) {
+            console.error('Upload failed:', error);
+          }
         }
       });
     }
+    
+    // Procurement Upload
     const procZone = document.getElementById("procUploadZone");
     if (procZone) {
       procZone.onclick = () => document.getElementById("procFileInput")?.click();
-      document.getElementById("procFileInput")?.addEventListener("change", (e) => {
+      document.getElementById("procFileInput")?.addEventListener("change", async (e) => {
         if (e.target.files[0]) {
-          procurementFiles.push({ name: e.target.files[0].name, dept: "Procurement", uploadedBy: "User", date: new Date().toISOString().slice(0,10), status: "Active" });
-          loadPage("folder");
+          const formData = new FormData();
+          formData.append('file', e.target.files[0]);
+          formData.append('category', 'procurement');
+          
+          try {
+            await fetch(`${API_BASE_URL}/documents/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            document.getElementById("procStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
+            setTimeout(() => { document.getElementById("procStatus").innerHTML = ""; }, 3000);
+            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Procurement", "");
+            if (currentPage === "folder") {
+              loadPage("folder");
+            }
+          } catch (error) {
+            console.error('Upload failed:', error);
+          }
         }
       });
     }
   }
 
-  // Sidebar Navigation - FIXED: proper event binding
+  // Sidebar Navigation
   document.querySelectorAll(".sidebar-item").forEach(item => {
     item.addEventListener("click", (e) => {
       e.preventDefault();
@@ -367,7 +870,7 @@
     });
   });
 
-  // Load home page
+  // Initial load
   loadPage("home");
 </script>
 </body>
