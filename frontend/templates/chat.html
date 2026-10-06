@@ -1,64 +1,167 @@
 {% extends "base.html" %}
+{% block title %}AI Studio{% endblock %}
 {% block content %}
-<div class="max-w-3xl mx-auto">
-    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-8">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+{% set risk_badges = {
+    'Low': 'bg-emerald-100 text-emerald-800',
+    'Medium': 'bg-yellow-100 text-yellow-800',
+    'High': 'bg-orange-100 text-orange-800',
+    'Critical': 'bg-red-100 text-red-800',
+} %}
+{% set ask_message = "Searching your documents and writing an answer. The first question after a restart can take about a minute." %}
+<div class="max-w-7xl space-y-8">
+    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600">Role Access</p>
-                <h2 class="text-4xl font-bold text-gray-900 mt-2">AI Document Assistant</h2>
+                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">AI Studio</p>
+                <h1 class="text-4xl font-bold text-gray-900 mb-3">Ask your documents</h1>
+                <p class="text-gray-600 max-w-2xl">Answers come only from the documents your role can access, with the sources, a risk rating and a recommended next step. Everything runs on the local Gemma model.</p>
             </div>
-            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl px-5 py-4">
-                <p class="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-1">Allowed Categories</p>
-                <p class="text-gray-800 font-semibold">{{ allowed_categories|join(', ')|title }}</p>
+            <div class="flex flex-col items-start gap-3 lg:items-end">
+                <div class="flex flex-wrap gap-2">
+                    {% for category in allowed_categories %}
+                    <span class="rounded-full bg-indigo-50 border border-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700">{{ category|category_label }}</span>
+                    {% endfor %}
+                </div>
+                {% if history %}
+                <form method="post" action="{{ url_for('chat_clear') }}">
+                    <button class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">New conversation</button>
+                </form>
+                {% endif %}
             </div>
         </div>
-        <p class="text-gray-500 mt-4">Ask questions only from the documents your role is allowed to access. The local Gemma model will answer using those records.</p>
     </div>
 
-    <!-- <div class="flex flex-wrap justify-center gap-3 mb-8">
-        <button onclick="document.getElementById('q').value='Summarize the latest procurement file'" class="bg-white px-5 py-2.5 rounded-full border border-gray-300 shadow-sm text-sm font-semibold text-gray-700 hover:border-indigo-500 hover:text-indigo-600 transition-all">Summarize Procurement</button>
-        <button onclick="document.getElementById('q').value='What files mention audits or bonuses?'" class="bg-white px-5 py-2.5 rounded-full border border-gray-300 shadow-sm text-sm font-semibold text-gray-700 hover:border-indigo-500 hover:text-indigo-600 transition-all">Find Related Files</button>
-    </div> -->
-
-    <form method="post" class="flex flex-col gap-3 sm:flex-row sm:items-center" data-loading-message="Thinking hard to give a reply... the model is searching for a sensible answer.">
-        <input id="q" type="text" name="query" placeholder="Type your question here..." class="flex-grow p-4 rounded-xl border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none transition shadow-sm">
-        <button class="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Ask Gemma</button>
-    </form>
-
-    {% if answer %}
-    <div class="mt-10 space-y-6">
-        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">Findings Summary</h4>
-            <p class="text-gray-700 whitespace-pre-line">{{ answer.summary }}</p>
-        </div>
-
-        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">Gemma Response</h4>
-            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
-                {{ answer.answer }}
+    <div class="grid gap-6 xl:grid-cols-3">
+        <section class="xl:col-span-2 flex h-[44rem] flex-col bg-white rounded-2xl border border-gray-200 shadow-sm">
+            <div class="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h2 class="text-lg font-bold text-gray-900">Conversation</h2>
+                <span class="text-sm text-gray-500">{{ history|length }} question{{ '' if history|length == 1 else 's' }}</span>
             </div>
-        </div>
 
-        <!-- <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">RAG Response</h4>
-            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
-                {{ answer.RAG_answer }}
-            </div>
-        </div> -->
-
-        <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">Matched Documents</h4>
-            <div class="space-y-4">
-                {% for source in answer.sources %}
-                <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p class="font-semibold text-gray-900">{{ source.filename }}</p>
-                    <p class="text-sm text-gray-600 mb-2">Category: {{ source.category|title }}</p>
-                    <p class="text-sm text-gray-700">{{ source.excerpt }}</p>
+            <div id="chatMessages" class="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                {% for item in history %}
+                {% set result = item.result %}
+                <div class="flex justify-end">
+                    <div class="max-w-[85%] rounded-2xl rounded-br-md bg-indigo-600 px-4 py-3 text-white shadow-sm">
+                        <p class="whitespace-pre-line">{{ item.question }}</p>
+                        <p class="mt-1 text-right text-xs text-indigo-200">{{ item.created_at|datetime('%d %b, %H:%M') }}</p>
+                    </div>
+                </div>
+                <div class="flex justify-start">
+                    <div class="max-w-[90%] space-y-3 rounded-2xl rounded-bl-md border border-gray-200 bg-gray-50 px-5 py-4">
+                        <p class="whitespace-pre-line text-gray-900">{{ result.answer }}</p>
+                        {% for title, value in [('Key findings', result.key_findings), ('Reasoning', result.reasoning), ('Recommendation', result.recommendation)] if value %}
+                        <div>
+                            <p class="text-xs font-bold uppercase tracking-wider text-indigo-600">{{ title }}</p>
+                            <p class="mt-1 whitespace-pre-line text-sm text-gray-700">{{ value }}</p>
+                        </div>
+                        {% endfor %}
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs text-gray-500">
+                            <span class="rounded-full px-2.5 py-1 font-semibold {{ risk_badges.get(result.risk_level, risk_badges['Low']) }}">{{ result.risk_level }} risk</span>
+                            <span>{{ result.confidence|int }}% confidence</span>
+                            <span>{{ result.response_time }} s</span>
+                            {% if result.sources %}<span>Sources: {{ result.sources|map(attribute='title')|join(', ') }}</span>{% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="flex h-full flex-col items-center justify-center text-center">
+                    <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-7 w-7" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+                    </span>
+                    <h3 class="mt-4 text-lg font-bold text-gray-900">Start a conversation</h3>
+                    <p class="mt-1 max-w-md text-sm text-gray-500">Type a question below or pick one of the suggestions. Your questions and answers are kept here until you start a new conversation.</p>
                 </div>
                 {% endfor %}
             </div>
-        </div>
+
+            <form method="post" class="flex gap-3 border-t border-gray-200 p-4" data-loading-message="{{ ask_message }}">
+                <label for="q" class="sr-only">Your question</label>
+                <input id="q" type="text" name="query" value="{{ pending_question }}" required autocomplete="off" {% if not history %}autofocus{% endif %}
+                       placeholder="Ask about governance, compliance, suppliers, ESG, risk or approvals..."
+                       class="flex-grow rounded-xl border border-gray-300 p-3.5 shadow-sm outline-none transition focus:ring-2 focus:ring-indigo-500">
+                <button class="rounded-xl bg-indigo-600 px-6 font-bold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">Ask</button>
+            </form>
+        </section>
+
+        <aside class="space-y-6">
+            <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-gray-900">Decision summary</h2>
+                {% if latest %}
+                <dl class="mt-4 space-y-4 text-sm">
+                    <div>
+                        <dt class="font-semibold text-gray-700">Confidence</dt>
+                        <dd class="mt-2">
+                            <div class="h-2 rounded-full bg-indigo-100">
+                                <div class="h-2 rounded-full bg-indigo-600" style="width: {{ latest.confidence|int }}%"></div>
+                            </div>
+                            <p class="mt-1 text-gray-600">{{ latest.confidence|int }}% (the model's own estimate)</p>
+                        </dd>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <dt class="font-semibold text-gray-700">Risk level</dt>
+                        <dd><span class="rounded-full px-3 py-1 text-xs font-semibold {{ risk_badges.get(latest.risk_level, risk_badges['Low']) }}">{{ latest.risk_level }}</span></dd>
+                    </div>
+                    {% if latest.recommendation %}
+                    <div>
+                        <dt class="font-semibold text-gray-700">Recommendation</dt>
+                        <dd class="mt-1 whitespace-pre-line text-gray-600">{{ latest.recommendation }}</dd>
+                    </div>
+                    {% endif %}
+                    <div class="flex items-center justify-between">
+                        <dt class="font-semibold text-gray-700">Response time</dt>
+                        <dd class="text-gray-900">{{ latest.response_time }} s</dd>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <dt class="font-semibold text-gray-700">Sources analysed</dt>
+                        <dd class="text-gray-900">{{ latest.sources|length }}</dd>
+                    </div>
+                </dl>
+                {% else %}
+                <p class="mt-2 text-sm text-gray-500">The confidence, risk level and recommendation of the latest answer appear here.</p>
+                {% endif %}
+            </section>
+
+            <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-gray-900">Sources retrieved</h2>
+                {% if latest and latest.sources %}
+                <ul class="mt-4 space-y-3">
+                    {% for source in latest.sources %}
+                    <li class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <p class="break-all text-sm font-semibold text-gray-900">{{ source.title }}</p>
+                        <div class="mt-1 flex items-center justify-between gap-3 text-xs">
+                            <span class="font-semibold text-gray-500">{{ source.category|category_label }}</span>
+                            <span class="shrink-0 rounded-full bg-indigo-100 px-2.5 py-1 font-semibold text-indigo-700">{{ source.relevance }}% match</span>
+                        </div>
+                        <p class="mt-2 text-sm text-gray-700">{{ source.excerpt }}</p>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="mt-2 text-sm text-gray-500">The documents the latest answer was based on appear here, with how well each one matched.</p>
+                {% endif %}
+            </section>
+
+            {% if suggestions %}
+            <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-gray-900">Suggested questions</h2>
+                <form method="post" class="mt-4 flex flex-wrap gap-2" data-loading-message="{{ ask_message }}">
+                    {% for suggestion in suggestions %}
+                    <button name="query" value="{{ suggestion }}"
+                            class="rounded-full border border-gray-300 bg-white px-3.5 py-2 text-left text-sm font-medium text-gray-700 transition hover:border-indigo-400 hover:text-indigo-700">{{ suggestion }}</button>
+                    {% endfor %}
+                </form>
+            </section>
+            {% endif %}
+        </aside>
     </div>
-    {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Show the newest message
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+</script>
 {% endblock %}

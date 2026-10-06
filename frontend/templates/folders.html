@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Folders{% endblock %}
+{% block content %}
+<div class="max-w-7xl space-y-8">
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-8">
+        <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">Document Repository</p>
+        <h1 class="text-4xl font-bold text-gray-900 mb-3">Folders</h1>
+        <p class="text-gray-600 max-w-3xl">Browse, read and upload documents in the categories your role can access. Uploaded files are indexed straight away, so AI Studio can answer from them.</p>
+    </div>
+
+    {% if not categories %}
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center text-gray-600">
+        Your role doesn't have access to any document categories.
+    </div>
+    {% else %}
+    <nav class="flex flex-wrap gap-2" aria-label="Categories">
+        {% for category in categories %}
+        <a href="{{ url_for('folders', category=category) }}"
+           class="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition {{ 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' if category == active else 'bg-white text-gray-700 border border-gray-200 hover:border-indigo-300 hover:text-indigo-700' }}"
+           {% if category == active %}aria-current="page"{% endif %}>
+            {{ category|category_label }}
+            <span class="rounded-full px-2 py-0.5 text-xs {{ 'bg-white/20 text-white' if category == active else 'bg-gray-100 text-gray-600' }}">{{ counts[category] }}</span>
+        </a>
+        {% endfor %}
+    </nav>
+
+    <div class="grid gap-6 xl:grid-cols-3">
+        <div class="space-y-6">
+            <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data"
+                  class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4"
+                  data-loading-message="Uploading the document and indexing it for AI Studio...">
+                <input type="hidden" name="category" value="{{ active }}">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-900">Upload to {{ active|category_label }}</h2>
+                    <p class="mt-1 text-sm text-gray-500">Plain-text (.txt) files. Uploading a file with an existing name replaces that document.</p>
+                </div>
+                <label class="block rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-5 text-center transition hover:border-indigo-400 hover:bg-indigo-50/40 cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="mx-auto h-8 w-8 text-indigo-500" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>
+                    <span class="mt-2 block text-sm font-semibold text-gray-700">Choose a .txt file</span>
+                    <input type="file" name="file" accept=".txt,text/plain" required
+                           class="mt-3 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                </label>
+                <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Upload document</button>
+            </form>
+
+            <form method="get" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+                <input type="hidden" name="category" value="{{ active }}">
+                <label for="folderSearch" class="block text-xl font-bold text-gray-900">Search {{ active|category_label }}</label>
+                <input id="folderSearch" type="text" name="q" value="{{ query_filter }}" placeholder="Filename or content"
+                       class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                <div class="flex gap-3">
+                    <button class="flex-1 rounded-lg bg-gray-900 px-4 py-3 font-bold text-white hover:bg-gray-800">Search</button>
+                    <a href="{{ url_for('folders', category=active) }}" class="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-center font-bold text-gray-700 hover:bg-gray-50">Reset</a>
+                </div>
+            </form>
+        </div>
+
+        <section class="xl:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="border-b border-gray-200 px-6 py-5">
+                <h2 class="text-xl font-bold text-gray-900">{{ active|category_label }} documents</h2>
+                <p class="text-sm text-gray-500">
+                    {% if query_filter %}{{ total_filtered }} match{{ '' if total_filtered == 1 else 'es' }} for “{{ query_filter }}”{% else %}{{ total_filtered }} document{{ '' if total_filtered == 1 else 's' }}{% endif %}
+                    · page {{ page }} of {{ total_pages }} · select a document to read it
+                </p>
+            </div>
+            <ul class="divide-y divide-gray-200">
+                {% for document in documents %}
+                <li>
+                    <details class="group">
+                        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+                            <span class="flex min-w-0 items-center gap-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6 shrink-0 text-indigo-500" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                                <span class="min-w-0">
+                                    <span class="block truncate font-semibold text-gray-900">{{ document.filename }}</span>
+                                    <span class="block text-xs text-gray-500">Updated {{ document.updated_at|datetime }} · {{ document.content|wordcount }} words</span>
+                                </span>
+                            </span>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 shrink-0 text-gray-400 transition group-open:rotate-180" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                        </summary>
+                        <div class="px-6 pb-6">
+                            <pre class="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-4 font-sans text-sm leading-relaxed text-gray-700">{{ document.content }}</pre>
+                            {% if session.get('role') == 'admin' %}
+                            <a href="{{ url_for('admin_files', edit_id=document.id) }}" class="mt-3 inline-block text-sm font-semibold text-indigo-600 hover:text-indigo-700">Edit in Manage Files &rarr;</a>
+                            {% endif %}
+                        </div>
+                    </details>
+                </li>
+                {% else %}
+                <li class="px-6 py-12 text-center text-gray-500">
+                    {% if query_filter %}No documents match your search.{% else %}No documents in this folder yet. Upload the first one.{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% if total_pages > 1 %}
+            <div class="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+                <p class="text-sm text-gray-500">10 documents per page.</p>
+                <div class="flex gap-2">
+                    {% if page > 1 %}
+                    <a class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50" href="{{ url_for('folders', category=active, q=query_filter or None, page=page-1) }}">Previous</a>
+                    {% endif %}
+                    {% if page < total_pages %}
+                    <a class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50" href="{{ url_for('folders', category=active, q=query_filter or None, page=page+1) }}">Next</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </section>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

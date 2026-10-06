@@ -1,7 +1,7 @@
 # backend/api.py
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import os
+import threading
 from database_logic import (
     authenticate_user,
     bootstrap_database,
@@ -14,18 +14,26 @@ from database_logic import (
     save_text_document,
     create_category,
     get_allowed_categories,
-    call_local_model,
-    get_relevant_context,
+    answer_question,
+    record_ai_query,
+    get_ai_history,
+    archive_ai_history,
+    get_dashboard_metrics,
+    get_system_status,
+    list_accounts,
+    sync_vector_index,
+    OLLAMA_HOST,
 )
 
+# Only the web app calls this API (server to server), so there is no CORS:
+# other websites open in the user's browser can't call it either.
 app = Flask(__name__)
-CORS(app)
 
 BACKEND_PORT = int(os.environ.get('BACKEND_PORT', 5001))
 
 # ============ BOOTSTRAP ON STARTUP ============
-# This runs when the module loads, BEFORE the main block
-# Useful for initialization
+# This runs when the module loads, BEFORE the main block:
+# creates missing tables and imports new files from data/
 with app.app_context():
     print("🔄 Bootstrapping database on startup...")
     try:
@@ -34,6 +42,16 @@ with app.app_context():
     except Exception as e:
         print(f"⚠️ Bootstrap warning: {e}")
 
+def _sync_vectors_in_background():
+    """Embed any documents missing from ChromaDB without blocking startup."""
+    try:
+        result = sync_vector_index()
+        print(f"✅ Vector index sync: {result}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Vector index sync skipped (is Ollama running at {OLLAMA_HOST}?): {e}", flush=True)
+
+threading.Thread(target=_sync_vectors_in_background, daemon=True).start()
+
 # ============ API ENDPOINTS ============
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -41,24 +59,24 @@ def health_check():
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    data = request.json
-    username = data.get('username', '').strip()
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
     password = data.get('password')
-    
+
     user = authenticate_user(username, password)
-    
+
     if user:
         return jsonify({"success": True, "user": user}), 200
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
 @app.route('/api/delete-document', methods=['POST'])
 def api_delete_document():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     document_id = data.get('document_id')
     username = data.get('username') or 'system'
-    
+
     deleted_document = delete_document_by_id(document_id)
-    
+
     if deleted_document:
         log_audit(
             username, 'delete',
@@ -67,7 +85,7 @@ def api_delete_document():
             details=f'Deleted {deleted_document["filename"]}',
         )
         return jsonify({"success": True, "filename": deleted_document['filename']}), 200
-    
+
     return jsonify({"success": False, "message": "Document not found"}), 404
 
 @app.route('/api/document/<document_id>', methods=['GET'])
@@ -79,16 +97,10 @@ def api_get_document(document_id):
 
 @app.route('/api/documents/<role>', methods=['GET'])
 def api_get_documents(role):
-    print(f"CANARY: Backend API hit for role: {role}", flush=True)
     try:
-        documents = get_documents(role) # This returns a list of sqlite3.Row
-        
-        # FIX: Convert each Row object into a standard dictionary
-        serialized_documents = [dict(doc) for doc in documents]
-        
-        print(f"DEBUG: Successfully serialized {len(serialized_documents)} documents", flush=True)
-        return jsonify({"success": True, "documents": serialized_documents}), 200
-        
+        # sqlite3.Row objects aren't JSON serializable, so convert each one to a dict
+        documents = [dict(doc) for doc in get_documents(role)]
+        return jsonify({"success": True, "documents": documents}), 200
     except Exception as e:
         print(f"ERROR: Backend failed: {str(e)}", flush=True)
         return jsonify({"success": False, "message": str(e)}), 500
@@ -109,7 +121,7 @@ def api_get_categories(role):
 
 @app.route('/api/categories', methods=['POST'])
 def api_create_category():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     name = data.get('name') or data.get('category')
     if not name:
         return jsonify({'success': False, 'error': 'Category name is required'}), 400
@@ -122,69 +134,6 @@ def api_create_category():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/generate', methods=['POST'])
-def api_generate():
-    data = request.json
-    prompt = data.get('prompt')
-    
-    if not prompt:
-        return jsonify({"error": "Prompt is required"}), 400
-        
-    try:
-        result = call_local_model(prompt)
-        return jsonify({"model_answer": result}), 200
-    except Exception as e:
-        return jsonify({"error": "Model failed to generate response"}), 500
-
-# @app.route('/api/RAG', methods=['POST'])
-# def generate():
-#     data = request.json()
-#     query = data.get('prompt')
-    
-#     # 1. Get relevant context (instead of reading all files)
-#     context = get_relevant_context(query)
-    
-#     # 2. Construct a professional RAG prompt
-#     prompt = f"""You are a helpful assistant. Use the provided context to answer the question.
-#     Cite the source filenames provided in the context.
-    
-#     Context:
-#     {context}
-    
-#     Question: {query}
-#     """
-    
-#     # 3. Call your model
-#     try:
-#         result = call_local_model(prompt)
-#         return jsonify({"model_answer": result}), 200
-#     except Exception as e:
-#         return jsonify({"error": "Model failed to generate response"}), 500
-
-@app.route('/api/RAG', methods=['POST'])
-def generate():
-    # FIX: Use get_json()
-    data = request.get_json()
-    query = data.get('prompt')
-    
-    try:
-        # Get context and add a safety check
-        context = get_relevant_context(query)
-        if not context:
-            context = "No relevant information found in the database."
-
-        prompt = f"..." 
-
-        result = call_local_model(prompt)
-        return jsonify({"model_answer": result}), 200
-        
-    except Exception as e:
-        # LOG THE REAL ERROR
-        print(f"DEBUG: RAG Pipeline Error: {str(e)}")
-        import traceback
-        traceback.print_exc() # This will show you exactly which line failed
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/api/audit/logs', methods=['GET'])
 def get_audit_logs():
     limit = request.args.get('limit', default=100, type=int)
@@ -193,30 +142,21 @@ def get_audit_logs():
     serialized_logs = [dict(row) for row in logs]
     return jsonify(serialized_logs)
 
-
-@app.route('/api/audit-logs', methods=['GET'])
-def get_audit_logs_alias():
-    """Compatibility alias: older frontend code calls /api/audit-logs."""
-    return get_audit_logs()
-
 @app.route('/api/documents', methods=['POST'])
 def api_handle_document():
     try:
-        data = request.get_json()
-        print(f"DEBUG: Data received in API: {data}", flush=True)
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
-        
+
         required = ['category', 'filename', 'content', 'actor', 'action']
         missing = [f for f in required if f not in data]
-        
+
         if missing:
             return jsonify({
                 'success': False,
                 'error': f'Missing fields: {", ".join(missing)}'
             }), 400
-        category = data['category'].strip()
-        filename = data['filename'].strip()
 
         file_path = save_text_document(
             category=data['category'],
@@ -227,13 +167,15 @@ def api_handle_document():
             previous_category=data.get('previous_category'),
             previous_filename=data.get('previous_filename')
         )
-        
+
         return jsonify({
             'success': True,
             'message': f"Document {data['action']} successful",
             'file_path': file_path
         }), 200
-        
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -245,6 +187,73 @@ def run_bootstrap():
     except Exception as e:
         return jsonify({'success': False, 'message': f'Bootstrap failed: {str(e)}'}), 500
 
+@app.route('/api/reindex', methods=['POST'])
+def api_reindex():
+    """Re-embed every document into ChromaDB (needs Ollama + the embedding model)."""
+    try:
+        result = sync_vector_index(force=True)
+        return jsonify({'success': True, **result}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============ DASHBOARD, AI STUDIO AND SETTINGS ============
+@app.route('/api/dashboard/metrics', methods=['GET'])
+def api_dashboard_metrics():
+    # With ?role=, document counts only cover that role's categories
+    role = request.args.get('role')
+    try:
+        return jsonify(get_dashboard_metrics(get_allowed_categories(role) if role else None)), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai/query', methods=['POST'])
+def api_ai_query():
+    data = request.get_json(silent=True) or {}
+    question = (data.get('question') or '').strip()
+    if not question:
+        return jsonify({'error': 'Question is required'}), 400
+
+    # With a role, only that role's categories are searched; without one, every category is
+    role = data.get('role')
+    categories = get_allowed_categories(role) if role else None
+    user = data.get('user') or 'api'
+
+    try:
+        result = answer_question(question, categories=categories)
+    except Exception as e:
+        print(f"DEBUG: AI query failed: {e}", flush=True)
+        return jsonify({'error': f'AI model unavailable: {e}'}), 503
+
+    result['id'] = record_ai_query(user, question, result)
+    log_audit(
+        user, 'ai_query',
+        details=f"{question[:120]} | confidence {result['confidence']}% | {result['response_time']}s",
+    )
+    return jsonify(result), 200
+
+@app.route('/api/ai/history', methods=['GET'])
+def api_ai_history():
+    user = (request.args.get('user') or '').strip()
+    if not user:
+        return jsonify({'error': 'user is required'}), 400
+    limit = max(1, min(request.args.get('limit', default=20, type=int), 100))
+    return jsonify({'history': get_ai_history(user, limit)}), 200
+
+@app.route('/api/ai/history/clear', methods=['POST'])
+def api_clear_ai_history():
+    user = ((request.get_json(silent=True) or {}).get('user') or '').strip()
+    if not user:
+        return jsonify({'error': 'user is required'}), 400
+    return jsonify({'success': True, 'archived': archive_ai_history(user)}), 200
+
+@app.route('/api/system/status', methods=['GET'])
+def api_system_status():
+    return jsonify(get_system_status()), 200
+
+@app.route('/api/accounts', methods=['GET'])
+def api_accounts():
+    return jsonify({'accounts': list_accounts()}), 200
+
 # ============ MAIN BLOCK - SERVER STARTS HERE ============
 if __name__ == '__main__':
     print("=" * 50)
@@ -254,19 +263,12 @@ if __name__ == '__main__':
     print(f"📁 Data directory: {os.environ.get('DATA_ROOT', './data')}")
     print("=" * 50)
     print("📋 Available endpoints:")
-    print("  POST   /api/login")
-    print("  GET    /api/health")
-    print("  GET    /api/documents/<role>")
-    print("  GET    /api/document/<id>")
-    print("  POST   /api/documents")
-    print("  POST   /api/delete-document")
-    print("  GET    /api/categories/<role>")
-    print("  GET    /api/access-label/<role>")
-    print("  POST   /api/generate")
-    print("  GET    /api/audit/logs")
-    print("  POST   /api/bootstrap/run")
+    for rule in sorted(app.url_map.iter_rules(), key=lambda rule: rule.rule):
+        if rule.endpoint != 'static':
+            methods = ', '.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+            print(f"  {methods:<7} {rule.rule}")
     print("=" * 50)
-    
+
     # Start the Flask development server
     app.run(
         host='0.0.0.0',      # Allow external connections (Docker needs this)

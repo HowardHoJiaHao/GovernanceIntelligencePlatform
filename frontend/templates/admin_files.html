@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Manage Files{% endblock %}
 {% block content %}
 <div class="max-w-7xl space-y-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-8">
@@ -7,31 +8,30 @@
         <p class="text-gray-600">Upload, edit, delete existing documents, and keep the SQLite database synced with the text folders.</p>
     </div>
 
-    <!-- <div class="grid gap-6 xl:grid-cols-3"> -->
-    <form method="post" enctype="multipart/form-data" id="uploadForm" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5 xl:col-span-2" data-loading-message="Uploading file... the document is thinking hard about its new home.">
+    <div class="grid gap-6 xl:grid-cols-3">
+    <form method="post" enctype="multipart/form-data" id="uploadForm" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5 xl:col-span-2" data-loading-message="Uploading the document and indexing it for AI Studio...">
         <input type="hidden" name="action" value="upload_document">
         <div class="flex items-center justify-between">
             <div>
                 <h2 class="text-2xl font-bold text-gray-900">Upload New TXT File</h2>
-                <p class="text-sm text-gray-500 mt-1">Admins can create a new category automatically by typing one here.</p>
+                <p class="text-sm text-gray-500 mt-1">The file is saved to its category folder, the database and the AI search index.</p>
             </div>
             <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700">+ Upload</span>
         </div>
 
         <div class="grid gap-4 md:grid-cols-2">
             <div>
-                <label class="block mb-2 font-semibold text-sm text-gray-700">Category</label>
-                <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                <label class="block mb-2 font-semibold text-sm text-gray-700" for="uploadCategory">Category</label>
+                <select id="uploadCategory" name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
                     {% for category in upload_categories %}
-                    <option value="{{ category }}">{{ category|title }}</option>
+                    <option value="{{ category }}">{{ category|category_label }}</option>
                     {% endfor %}
                 </select>
             </div>
-        </div>
-
-        <div>
-            <label class="block mb-2 font-semibold text-sm text-gray-700">Choose File (.txt)</label>
-            <input type="file" name="file" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+            <div>
+                <label class="block mb-2 font-semibold text-sm text-gray-700" for="uploadFile">Choose File (.txt)</label>
+                <input id="uploadFile" type="file" name="file" accept=".txt,text/plain" required class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+            </div>
         </div>
 
         <button type="submit" id="submitBtn" class="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Upload and Sync</button>
@@ -52,21 +52,21 @@
         btn.classList.add('opacity-50', 'cursor-not-allowed');
         });
     </script>
-        <!-- <div class="space-y-6">
-            <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Creating the new category... the folder is stretching its legs.">
-                <input type="hidden" name="action" value="create_category">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-2xl font-bold text-gray-900">Create Category</h2>
-                    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">Folder</span>
-                </div>
-                <div>
-                    <label class="block mb-2 font-semibold text-sm text-gray-700">Category Name</label>
-                    <input type="text" name="category_name" placeholder="policy_updates" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
-                </div>
-                <button class="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-lg hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">Create Category</button>
-            </form>
-        </div> -->
-    <!-- </div> -->
+
+    <form method="post" class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 space-y-5" data-loading-message="Creating the category folder...">
+        <input type="hidden" name="action" value="create_category">
+        <div class="flex items-center justify-between">
+            <h2 class="text-2xl font-bold text-gray-900">Create Category</h2>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">Folder</span>
+        </div>
+        <div>
+            <label class="block mb-2 font-semibold text-sm text-gray-700" for="categoryName">Category Name</label>
+            <input id="categoryName" type="text" name="category_name" required placeholder="policy_updates" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
+            <p class="mt-2 text-sm text-gray-500">New categories are visible to admins only.</p>
+        </div>
+        <button class="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-lg hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">Create Category</button>
+    </form>
+    </div>
 
     <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 space-y-5">
         <form method="get" class="grid gap-4 lg:grid-cols-3 items-end">
@@ -79,7 +79,7 @@
                 <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
                     <option value="">All categories</option>
                     {% for category in upload_categories %}
-                    <option value="{{ category }}" {% if category_filter == category %}selected{% endif %}>{{ category|title }}</option>
+                    <option value="{{ category }}" {% if category_filter == category %}selected{% endif %}>{{ category|category_label }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -108,7 +108,7 @@
                 <label class="block mb-2 font-semibold text-sm text-gray-700">Category</label>
                 <select name="category" class="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition">
                     {% for category in upload_categories %}
-                    <option value="{{ category }}" {% if edit_document['category'] == category %}selected{% endif %}>{{ category|title }}</option>
+                    <option value="{{ category }}" {% if edit_document['category'] == category %}selected{% endif %}>{{ category|category_label }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -148,19 +148,23 @@
                 <tr class="hover:bg-gray-50 transition">
                     <td class="px-6 py-4 font-medium text-gray-800">{{ document['filename'] }}</td>
                     <td class="px-6 py-4">
-                        <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-800">{{ document['category']|title }}</span>
+                        <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-800">{{ document['category']|category_label }}</span>
                     </td>
-                    <td class="px-6 py-4 text-sm text-gray-600">{{ document['updated_at'] }}</td>
+                    <td class="px-6 py-4 text-sm text-gray-600">{{ document['updated_at']|datetime }}</td>
                     <td class="px-6 py-4">
                         <div class="flex flex-wrap gap-2">
                             <a href="{{ url_for('admin_files', edit_id=document['id'], page=page, category=category_filter, q=query_filter) }}" class="rounded-lg border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Edit</a>
                             <form method="post" class="inline" data-loading-message="Deleting the file... even bad paperwork deserves a proper goodbye.">
                                 <input type="hidden" name="action" value="delete_document">
                                 <input type="hidden" name="document_id" value="{{ document['id'] }}">
-                                <button type="submit" onclick="return confirm('Delete {{ document.filename }}?')" class="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Delete</button>
+                                <button type="submit" data-confirm="Delete {{ document.filename }}? This can't be undone." onclick="return confirm(this.dataset.confirm)" class="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Delete</button>
                             </form>
                         </div>
                     </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="px-6 py-8 text-center text-gray-500">No documents match these filters.</td>
                 </tr>
                 {% endfor %}
             </tbody>
