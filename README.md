@@ -7,6 +7,12 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![Ollama](https://img.shields.io/badge/AI-Ollama%20(local)-000000)
 
+![EGIP dashboard: KPIs, the 7-day AI query trend and risk levels of AI answers](docs/screenshots/dashboard.png)
+
+| ![AI Studio: a structured answer with its sources](docs/screenshots/ai-studio.png) | ![Folders: documents per category with search and upload](docs/screenshots/folders.png) |
+|:---:|:---:|
+| **AI Studio:** answers with sources, a risk level and a confidence score | **Folders:** read, search and upload documents for your role |
+
 ## Contents
 
 - [Overview](#overview)
@@ -134,6 +140,19 @@ AI Studio only searches the categories your role can access. If no document matc
 | `gemma2:2b` | Writes the answers | ~1.6 GB |
 | `nomic-embed-text` | Turns text into vectors for semantic search | ~274 MB |
 
+### How fast is it?
+
+Without a usable GPU, Ollama runs the model on the CPU, so expect **about 1 to 2 minutes per answer**. Measured on a laptop with a 4-core Intel Core i5 (10th gen) and `gemma2:2b`:
+
+| Step | Time |
+|---|---|
+| Load the model (first question, or after 5 minutes without one) | ~12 s |
+| Read the question and the matched documents (~1,750 tokens at ~25 tokens/s) | ~70 s |
+| Write the structured answer (~200 tokens at ~4 tokens/s) | ~50 s |
+| Search, database and web app | under 1 s |
+
+Almost all of the time is the model itself. A GPU that can hold the whole model brings answers down to seconds; a 2 GB laptop GPU only fits part of it. Before a demo, ask one question so the model is already loaded, and keep the laptop plugged in. To stop Ollama unloading the model after 5 idle minutes, set `OLLAMA_KEEP_ALIVE=1h` in Ollama's environment and restart Ollama.
+
 ---
 
 ## Tech stack
@@ -168,6 +187,7 @@ GovernanceIntelligencePlatform/
 │   ├── compliance/
 │   ├── document/              # governance documents
 │   └── procurement/
+├── docs/screenshots/          # images used in this README
 ├── database.db                # SQLite database with 17 sample documents
 ├── chroma_db/                 # vector store used by local runs
 ├── docker-compose.yml
@@ -361,7 +381,8 @@ On Windows PowerShell, type `curl.exe` instead of `curl`.
 | AI says Ollama/Gemma is not available | Open **Settings**, or check `curl http://localhost:11434/api/version` and that `ollama list` shows `gemma2:2b`. On Windows, start the Ollama app. |
 | Backend log: `model "nomic-embed-text" not found`, or Settings shows *Keyword fallback* | Run `ollama pull nomic-embed-text`, then **Settings → Re-index all documents**. Until then, AI search uses keyword matching. |
 | Docker backend cannot reach Ollama | Docker Desktop (Windows/macOS) provides `host.docker.internal` automatically. On Linux, start Ollama with `OLLAMA_HOST=0.0.0.0 ollama serve` and keep port 11434 firewalled. |
-| First AI answer is slow | The model loads into memory on the first request. On CPU-only machines this can take about a minute. |
+| AI answers take 1 to 2 minutes | Normal without a GPU; see [How fast is it?](#how-fast-is-it). The first question also loads the model. Ask one question before a demo, or set `OLLAMA_KEEP_ALIVE=1h` for Ollama so the model stays loaded. |
+| Ollama's log shows `device lost` or `Invalid device index`, or `nvidia-smi` says *GPU is lost* | The GPU crashed while running the model, and Ollama now falls back to the CPU. Restart the computer to recover the GPU and update its driver from the manufacturer. Small laptop GPUs (around 2 GB) only fit part of the model, so the CPU is often the more stable choice. Ollama's log is in `%LOCALAPPDATA%\Ollama\server.log` on Windows. |
 | Port 5000 or 5001 already in use | Windows: `netstat -ano \| findstr :5001`, then `taskkill /PID <PID> /F`. macOS/Linux: `lsof -i :5001`. |
 | `UnicodeEncodeError` when starting `backend/api.py` directly on Windows | Start with `uv run main.py`, or set `PYTHONUTF8=1` first. |
 | Dashboard shows zeros and *backend is not responding* | The web app can't reach `BACKEND_URL`. Check `curl http://localhost:5001/api/health` and the backend logs. |
@@ -399,6 +420,7 @@ On Windows PowerShell, type `curl.exe` instead of `curl`.
 - **Docker writes to the project folder.** Uploads and deletions in Docker change `database.db` and `data/` in your working copy.
 - **Dates use the server's clock.** "Today" on the dashboard and the times on each page use the server's local time zone; Docker containers run in UTC unless you set one.
 - **Risk levels are the model's own rating** of each answer, not a compliance score. Accounts are managed in `.env`, not in the app.
+- **Small model, slow on a CPU.** `gemma2:2b` keeps everything local and light, but it can misread numbers (always check the cited sources) and takes 1 to 2 minutes per answer without a GPU. A larger model can be set with `OLLAMA_MODEL`.
 
 ---
 
