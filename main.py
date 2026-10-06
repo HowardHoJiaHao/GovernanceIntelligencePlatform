@@ -30,7 +30,12 @@ def main():
     env.setdefault('BACKEND_PORT', '5001')
     env.setdefault('FRONTEND_PORT', '5000')
     if not env.get('BACKEND_URL') or 'backend:' in env['BACKEND_URL']:
-        env['BACKEND_URL'] = f"http://localhost:{env['BACKEND_PORT']}"
+        env['BACKEND_URL'] = f"http://127.0.0.1:{env['BACKEND_PORT']}"
+    # "localhost" makes Windows try IPv6 first, which adds ~2 s to every request
+    # to the backend and to Ollama (both only listen on IPv4)
+    for name in ('BACKEND_URL', 'OLLAMA_HOST'):
+        if env.get(name):
+            env[name] = env[name].replace('://localhost', '://127.0.0.1')
     env.setdefault('PYTHONUNBUFFERED', '1')
     # The backend logs emoji; Windows pipes default to cp1252 and would crash on them
     env.setdefault('PYTHONUTF8', '1')

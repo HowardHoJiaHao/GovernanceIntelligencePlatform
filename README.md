@@ -64,21 +64,19 @@
 | Page | URL | Who | What it does |
 |---|---|---|---|
 | Login | `/login` | Everyone | Sign in with an account from `.env` |
-| Document Repository | `/` | All roles | Document counts for the categories your role can access |
-| AI Chatbot | `/chat` | All roles | Ask a question and get the same structured answer as AI Studio, searched only within your role's categories, with the matched documents and excerpts |
-| Upload | `/upload` | All roles | Upload a `.txt` file into one of your categories (not linked in the sidebar) |
-| EGIP Dashboard | `/egip` | Admin | Executive dashboard: KPIs, document folders and AI Studio (see below) |
-| Manage Files | `/admin/files` | Admin | Upload, edit, delete, search and filter documents |
+| Dashboard | `/` | All roles | KPIs, a 7-day AI query trend, risk levels of recent AI answers and documents per category; refreshes itself every 15 seconds |
+| Folders | `/folders` | All roles | One tab per category your role can access: read, search and upload `.txt` documents |
+| AI Studio | `/chat` | All roles | Ask questions about your role's documents and get structured answers with sources; the conversation is saved until you start a new one |
+| Manage Files | `/admin/files` | Admin | Upload, edit, move, delete, search and filter documents; create categories |
 | Audit Log | `/admin/audit` | Admin | The latest 200 audit records |
+| Settings | `/admin/settings` | Admin | Ollama and model status, search mode, knowledge base and re-indexing, accounts, recent activity |
 
-### EGIP Dashboard (`/egip`)
+### What each page shows
 
-- **Home:** documents per folder, AI queries today, average confidence and response time, and a 7-day AI query trend
-- **Folder:** Governance, Compliance and Procurement tabs with live document lists and `.txt` upload
-- **AI Studio:** semantic search plus a structured answer (key findings, reasoning, risk level, recommendation, confidence score) with the source documents and their relevance
-- **Settings:** recent audit records from the server and the total document count
-
-> The risk distribution, compliance score and procurement overview cards have no data source yet and show 0. User management on the Settings page is a mock-up and isn't saved.
+- **Dashboard:** documents you can access and when they last changed, AI queries today, average confidence and response time, a line chart of AI queries over the last 7 days (with a table view), and how many recent answers the model rated Low, Medium, High or Critical risk. Admins also see the latest activity.
+- **Folders:** Governance, Compliance and Procurement tabs (plus any category an admin creates) with document counts. Select a document to read it; uploads are indexed for AI Studio straight away.
+- **AI Studio:** each answer has key findings, reasoning, a risk level, a recommendation and a confidence score. The side panel shows a decision summary of the latest answer, the documents it was based on with how well each matched, and suggested questions for your role.
+- **Settings:** whether Ollama is reachable, whether both models are pulled, whether search is semantic or keyword-based, how many documents are indexed, and the configured accounts (never their passwords).
 
 ### Roles and access
 
@@ -109,7 +107,6 @@ flowchart LR
     ollama["Ollama on your computer :11434<br/>gemma2:2b + nomic-embed-text"]
 
     browser -- "pages" --> fe
-    browser -- "EGIP dashboard API calls" --> be
     fe -- "REST" --> be
     be --> db
     be --> files
@@ -117,8 +114,8 @@ flowchart LR
     be -- "generate / embed" --> ollama
 ```
 
-- The web app never touches the database. Everything goes through the backend REST API.
-- The EGIP dashboard runs in the browser and calls the backend directly on port 5001.
+- The browser only talks to the web app. The web app never touches the database; everything goes through the backend REST API.
+- All counting and searching happens in the backend (SQL for the dashboard numbers, ChromaDB or keyword matching for AI search), so every page shows the same numbers.
 - `database.db` and `data/` live in the project folder. The backend container mounts that folder, so the same files are used with and without Docker.
 
 ### How an AI answer is produced
@@ -126,9 +123,9 @@ flowchart LR
 1. **nomic-embed-text** turns the question into a vector, a list of numbers that captures its meaning.
 2. **ChromaDB** returns the documents whose vectors are closest. A question can therefore match a relevant policy even when the two share few words. If the embedding model is unavailable, EGIP falls back to keyword matching.
 3. The best-matching documents and the question are sent to **gemma2:2b**. It replies with key findings, reasoning, a risk level, a recommendation and a confidence score.
-4. The query is written to the audit log and counted on the dashboard.
+4. The answer is saved to your AI Studio conversation (the `ai_queries` table), written to the audit log and counted on the dashboard.
 
-The AI Chatbot page (`/chat`) and EGIP AI Studio use this same pipeline. The chatbot only searches the categories your role can access; AI Studio is admin-only and searches every category. If no document matches, EGIP says so without asking the model.
+AI Studio only searches the categories your role can access. If no document matches, EGIP says so without asking the model. Starting a new conversation hides the old answers from AI Studio but keeps them in the dashboard statistics.
 
 ### AI models
 
@@ -143,9 +140,8 @@ The AI Chatbot page (`/chat`) and EGIP AI Studio use this same pipeline. The cha
 
 | Layer | Technology |
 |---|---|
-| Web app | Flask, Jinja2 templates, Tailwind CSS (CDN) |
-| EGIP dashboard | HTML, Bootstrap 5, Chart.js |
-| Backend API | Flask, flask-cors |
+| Web app | Flask, Jinja2 templates, Tailwind CSS (CDN), Chart.js (CDN) |
+| Backend API | Flask |
 | Database | SQLite |
 | Vector search | ChromaDB 1.5 |
 | AI | Ollama with gemma2:2b and nomic-embed-text |
@@ -165,20 +161,15 @@ GovernanceIntelligencePlatform/
 │   └── Dockerfile
 ├── frontend/                  # Web app (port 5000)
 │   ├── app.py                 # Flask pages; calls the backend API
-│   ├── egip.html              # EGIP dashboard, served at /egip
-│   ├── templates/             # Jinja2 + Tailwind pages
+│   ├── templates/             # Jinja2 + Tailwind pages (dashboard, folders, chat, admin)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── data/                      # Source .txt documents, one folder per category
 │   ├── compliance/
 │   ├── document/              # governance documents
 │   └── procurement/
-├── scripts/
-│   ├── ingest.py              # load data/ into SQLite and ChromaDB
-│   └── synthetic_data.py      # generate demo files (deletes database.db!)
-├── database.db                # SQLite database with 14 sample documents
+├── database.db                # SQLite database with 17 sample documents
 ├── chroma_db/                 # vector store used by local runs
-├── check_count.py, countchromadb.py, test.py   # quick ChromaDB inspection scripts
 ├── docker-compose.yml
 ├── main.py                    # local run: starts backend and web app together
 ├── Makefile                   # shortcuts: make up, make run, make health, ...
@@ -252,13 +243,13 @@ Local runs use `database.db`, `data/` and `chroma_db/` in the project folder.
 
 ### 5. Sign in
 
-Open **http://localhost:5000** and sign in with an account from `.env`. The default admin login is `admin` / `admin123`. Admins see **EGIP Dashboard**, **Manage Files** and **Audit Log** in the sidebar.
+Open **http://localhost:5000** and sign in with an account from `.env`. The default admin login is `admin` / `admin123`. Everyone sees **Dashboard**, **Folders** and **AI Studio**; admins also see **Manage Files**, **Audit Log** and **Settings**. Settings is the quickest way to check that Ollama and both models are ready.
 
-Questions to try in AI Studio or the AI Chatbot:
+Questions to try in AI Studio (it also suggests questions for your role):
 
 - *What ISO certification does Supplier Alpha have?*
 - *Which supplier best fulfills Project A requirements?*
-- *What are the ESG targets for 2026?*
+- *Can a Project Manager approve RM75,000?*
 
 Check that the backend is up with `curl http://localhost:5001/api/health`, which returns `{"status":"healthy"}`.
 
@@ -292,8 +283,8 @@ All settings live in `.env`; see [`.env.example`](.env.example).
 | `REPORTER_USER` / `REPORTER_PASS` | `reporter` / `reporter123` | Backend | Reporter account |
 | `USER_USER` / `USER_PASS` | `user` / `user123` | Backend | Standard user account |
 | `SECRET_KEY` | *(placeholder)* | Web app | Signs session cookies. Use a long random string; `make env` generates one. If it's missing or still the placeholder, the app uses a random key and logs everyone out on each restart. |
-| `BACKEND_URL` | `http://localhost:5001` | Web app | Where the web app finds the API |
-| `OLLAMA_HOST` | `http://localhost:11434` | Backend | Ollama server address |
+| `BACKEND_URL` | `http://127.0.0.1:5001` | Web app | Where the web app finds the API. Prefer `127.0.0.1` to `localhost`, which adds about 2 s to every request on Windows; `main.py` swaps it for you |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Backend | Ollama server address (`127.0.0.1` for the same reason as `BACKEND_URL`) |
 | `OLLAMA_MODEL` | `gemma2:2b` | Backend | Model that writes answers |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Backend | Model used for semantic search |
 | `DB_PATH` | empty, meaning `./database.db` | Backend | SQLite database file |
@@ -307,16 +298,16 @@ All settings live in `.env`; see [`.env.example`](.env.example).
 
 ## Managing documents
 
-- **Categories are folders.** `data/document/` (governance), `data/compliance/` and `data/procurement/` match the `category` column in the database.
-- **The app reads from `database.db`.** It ships with 14 sample documents. Files in `data/` are a copy of each document and are not re-read automatically.
-- **Uploading** (through Manage Files, `/upload` or the EGIP folder tabs) writes the file to `data/<category>/`, saves it in `database.db`, embeds it into ChromaDB and records it in the audit log. Only `.txt` files are supported.
-- **Vector index:** at startup the backend embeds any document that has no vector yet. To re-embed everything:
+- **Categories are folders.** `data/document/` (governance), `data/compliance/` and `data/procurement/` match the `category` column in the database. Categories an admin creates in Manage Files are visible to admins only.
+- **The app reads from `database.db`.** It ships with 17 sample documents. At startup the backend also imports any `.txt` file in `data/<category>/` that the database doesn't have yet, so you can drop files into a folder and restart.
+- **Uploading** (through Folders or Manage Files) writes the file to `data/<category>/`, saves it in `database.db`, embeds it into ChromaDB and records it in the audit log. Only `.txt` files are supported, and a file with an existing name replaces that document.
+- **Vector index:** at startup the backend embeds any document that has no vector yet and removes vectors whose document was deleted. To re-embed everything, use **Settings → Re-index all documents**, or:
 
   ```bash
   curl -X POST http://localhost:5001/api/reindex
   ```
 
-- **Rebuilding from `data/`:** back up and delete `database.db`, then run `uv run scripts/ingest.py` from the project root with Ollama running. If the database already has documents, the script adds duplicates.
+- **Rebuilding from `data/`:** back up and delete `database.db`, then start the app. The backend creates the tables and imports every `.txt` file in `data/`.
 - **Changing `OLLAMA_EMBED_MODEL`:** delete the vector store first, because vectors from different models can't be mixed. Delete `chroma_db/` for local runs, or run `docker compose down` and then `docker volume rm governanceintelligenceplatform_chroma_data` for Docker. Then start the app again.
 
 ---
@@ -329,22 +320,21 @@ Base URL: `http://localhost:5001`. All bodies are JSON unless noted.
 |---|---|---|
 | GET | `/api/health` | Liveness check |
 | POST | `/api/login` | Check `{username, password}`; returns the user and role |
-| GET | `/api/documents` | All documents (used by the EGIP dashboard) |
 | GET | `/api/documents/<role>` | Documents a role may see |
 | GET | `/api/document/<id>` | One document |
-| POST | `/api/documents` | Create or update `{category, filename, content, actor, action}` |
-| POST | `/api/documents/upload` | Upload a `.txt` (multipart: `file`, `category`; `governance` is stored as `document`) |
+| POST | `/api/documents` | Create or update `{category, filename, content, actor, action}` (optional `previous_category`, `previous_filename` to move or rename) |
 | POST | `/api/delete-document` | Delete `{document_id, username}` |
 | GET | `/api/categories/<role>` | Categories a role may access |
 | POST | `/api/categories` | Create a category folder `{name}` |
 | GET | `/api/access-label/<role>` | Readable description of a role's access |
-| POST | `/api/generate` | Send a raw `{prompt}` to the chat model |
-| POST | `/api/RAG` | Retrieve context and answer `{prompt}`; returns `{model_answer}` |
-| POST | `/api/ai/query` | Structured answer for AI Studio and the AI Chatbot `{question, role?, user?, module?}`; with `role`, only that role's categories are searched |
-| GET | `/api/dashboard/metrics` | Document counts and AI usage for the EGIP home page |
-| GET | `/api/audit/logs?limit=N` | Latest audit records (alias: `/api/audit-logs`) |
-| POST | `/api/audit/log` | Add an audit record `{user, action, module, details}` |
-| POST | `/api/bootstrap/run` | Create any missing database tables |
+| POST | `/api/ai/query` | Structured answer `{question, role?, user?}`; with `role`, only that role's categories are searched. The answer is saved to `user`'s conversation |
+| GET | `/api/ai/history?user=NAME` | That user's current AI Studio conversation |
+| POST | `/api/ai/history/clear` | Start a new conversation `{user}` (answers stay in the statistics) |
+| GET | `/api/dashboard/metrics?role=ROLE` | Document counts (for that role's categories, or all without `role`), AI usage today, 7-day trend and risk levels |
+| GET | `/api/system/status` | Ollama reachability, model availability, indexed document count and storage paths |
+| GET | `/api/accounts` | Configured accounts and roles (no passwords) |
+| GET | `/api/audit/logs?limit=N` | Latest audit records |
+| POST | `/api/bootstrap/run` | Create any missing database tables and import new files from `data/` |
 | POST | `/api/reindex` | Re-embed every document into ChromaDB |
 
 Example:
@@ -366,16 +356,15 @@ On Windows PowerShell, type `curl.exe` instead of `curl`.
 | Symptom | Fix |
 |---|---|
 | `env file .env not found` from Docker | Create `.env` from `.env.example` (step 2). |
-| Login page says *Backend service is unreachable* | Check `curl http://localhost:5001/api/health` and `docker compose logs backend`. For local runs, `BACKEND_URL` must be `http://localhost:5001`. |
+| Login page says *Backend service is unreachable* | Check `curl http://localhost:5001/api/health` and `docker compose logs backend`. For local runs, `BACKEND_URL` must be `http://127.0.0.1:5001`. |
 | *Invalid username or password* | Accounts come from `.env`. After editing it, run `docker compose up -d --force-recreate`, or restart `main.py`. |
-| AI says Ollama/Gemma is not available | Check `curl http://localhost:11434/api/version` and that `ollama list` shows `gemma2:2b`. On Windows, start the Ollama app. |
-| Backend log: `model "nomic-embed-text" not found` | Run `ollama pull nomic-embed-text`, then `curl -X POST http://localhost:5001/api/reindex`. Until then, AI search uses keyword matching. |
+| AI says Ollama/Gemma is not available | Open **Settings**, or check `curl http://localhost:11434/api/version` and that `ollama list` shows `gemma2:2b`. On Windows, start the Ollama app. |
+| Backend log: `model "nomic-embed-text" not found`, or Settings shows *Keyword fallback* | Run `ollama pull nomic-embed-text`, then **Settings → Re-index all documents**. Until then, AI search uses keyword matching. |
 | Docker backend cannot reach Ollama | Docker Desktop (Windows/macOS) provides `host.docker.internal` automatically. On Linux, start Ollama with `OLLAMA_HOST=0.0.0.0 ollama serve` and keep port 11434 firewalled. |
 | First AI answer is slow | The model loads into memory on the first request. On CPU-only machines this can take about a minute. |
 | Port 5000 or 5001 already in use | Windows: `netstat -ano \| findstr :5001`, then `taskkill /PID <PID> /F`. macOS/Linux: `lsof -i :5001`. |
 | `UnicodeEncodeError` when starting `backend/api.py` directly on Windows | Start with `uv run main.py`, or set `PYTHONUTF8=1` first. |
-| EGIP dashboard shows zeros or *Unable to process request* | The page calls `http://<host>:5001/api` from your browser. Make sure the backend is reachable on that port. |
-| AI cites the same document twice (local runs) | The committed `chroma_db/` contains old duplicate vectors. Delete `chroma_db/` and restart; the backend re-embeds everything at startup. |
+| Dashboard shows zeros and *backend is not responding* | The web app can't reach `BACKEND_URL`. Check `curl http://localhost:5001/api/health` and the backend logs. |
 
 ---
 
@@ -403,13 +392,13 @@ On Windows PowerShell, type `curl.exe` instead of `curl`.
 
 ## Known limitations and security notes
 
-- **No API authentication.** The backend accepts any request and allows cross-origin calls. Anyone who can reach port 5001 can read or delete documents. `docker-compose.yml` therefore publishes ports 5000 and 5001 on `127.0.0.1` only. Add authentication before opening them to other machines.
+- **No API authentication.** The backend accepts any request from anyone who can reach port 5001, who can then read or delete documents. It sends no CORS headers, so other websites open in your browser can't call it, and file and category names are sanitised so requests can't touch files outside `data/`. `docker-compose.yml` publishes ports 5000 and 5001 on `127.0.0.1` only. Add authentication before opening them to other machines.
 - **Debug mode.** The web app runs Flask with `debug=True`, which turns on the interactive debugger. That's another reason to keep port 5000 on localhost.
 - **Session key.** Anyone who knows `SECRET_KEY` can forge an admin login. Keep it secret and random, and never commit `.env`.
 - **Plain-text passwords** are stored in `.env`. Change the defaults. `.env` is already in `.gitignore`.
 - **Docker writes to the project folder.** Uploads and deletions in Docker change `database.db` and `data/` in your working copy.
-- **EGIP dashboard gaps.** The risk, compliance score and procurement cards have no data yet, and Settings → User Management is not saved.
-- **Scripts.** `scripts/synthetic_data.py` deletes `database.db`. `scripts/ingest.py` adds duplicates when documents already exist.
+- **Dates use the server's clock.** "Today" on the dashboard and the times on each page use the server's local time zone; Docker containers run in UTC unless you set one.
+- **Risk levels are the model's own rating** of each answer, not a compliance score. Accounts are managed in `.env`, not in the app.
 
 ---
 
@@ -417,7 +406,7 @@ On Windows PowerShell, type `curl.exe` instead of `curl`.
 
 - [ ] Authentication on the backend API and a production WSGI server
 - [ ] PDF and DOCX parsing, with document chunking
-- [ ] Real risk and compliance metrics on the dashboard
+- [ ] Compliance scores and procurement KPIs on the dashboard
 - [ ] User management stored in the database
 - [ ] Integration with SAP, Oracle and Microsoft SharePoint
 - [ ] AI-generated executive and compliance reports

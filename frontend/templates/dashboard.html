@@ -1,43 +1,295 @@
 {% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="max-w-6xl space-y-8">
+{# Risk levels use the fixed status colors; each one always sits beside its name and count #}
+{% set risk_colors = [('Low', '#0ca30c'), ('Medium', '#fab219'), ('High', '#ec835a'), ('Critical', '#d03b3b')] %}
+{% set risk_total = metrics.riskLevels.values()|sum %}
+<div class="max-w-7xl space-y-8">
     <div class="bg-white border border-gray-200 rounded-2xl shadow-lg p-8">
         <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">Role Access</p>
-                <h1 class="text-4xl font-bold text-gray-900 mb-3">Document Repository</h1>
-                <p class="text-gray-600 max-w-2xl">Your role is {{ role|capitalize }} and you can access <span class="font-semibold text-gray-900">{{ access_label }}</span>.</p>
+                <p class="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-2">Dashboard</p>
+                <h1 class="text-4xl font-bold text-gray-900 mb-3">Welcome back, {{ username }}</h1>
+                <p class="text-gray-600 max-w-2xl">
+                    Your governance, compliance and procurement documents in one place, with a private AI assistant that answers from them.
+                    As {{ role|capitalize }} you can access <span class="font-semibold text-gray-900">{{ access_label }}</span>.
+                </p>
             </div>
-            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl px-5 py-4 min-w-[240px]">
-                <p class="text-xs font-bold uppercase tracking-wider text-indigo-600 mb-2">Allowed Categories</p>
-                <p class="text-gray-800 font-semibold">{{ allowed_categories|join(', ')|title }}</p>
+            <div class="flex flex-wrap gap-3">
+                <a href="{{ url_for('chat') }}" class="rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition">Ask AI Studio</a>
+                <a href="{{ url_for('folders') }}" class="rounded-xl border border-gray-300 bg-white px-5 py-3 font-bold text-gray-700 hover:bg-gray-50 transition">Browse folders</a>
             </div>
         </div>
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <p class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Total Documents</p>
-            <p class="text-3xl font-bold text-gray-900">{{ total_documents }}</p>
+            <p class="text-sm font-semibold text-gray-500">Documents you can access</p>
+            <p class="mt-2 text-3xl font-semibold text-gray-900" data-metric="totalDocuments">{{ metrics.totalDocuments }}</p>
+            <p class="mt-1 text-sm text-gray-500">
+                Last change <span data-metric="lastUpdated">{{ metrics.lastUpdated|datetime if metrics.lastUpdated else 'none yet' }}</span>
+            </p>
         </div>
-        {% for metric in metrics %}
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-            <p class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">{{ metric.category|title }}</p>
-            <p class="text-3xl font-bold text-gray-900">{{ metric.count }}</p>
+            <p class="text-sm font-semibold text-gray-500">AI queries today</p>
+            <p class="mt-2 text-3xl font-semibold text-gray-900" data-metric="aiQueriesToday">{{ metrics.aiQueriesToday }}</p>
+            <p class="mt-1 text-sm text-gray-500">Across all users</p>
         </div>
-        {% endfor %}
-    </div>
-    <div class="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
-        <h1 class="text-3xl font-extrabold text-gray-900 mb-4">Intelligent Document Management</h1>
-        <p class="text-lg text-gray-600 leading-relaxed">
-            Stop hunting for files and start making informed decisions. 
-            Our platform integrates a centralized document manager with an 
-            AI-powered assistant, allowing you to instantly locate, 
-            summarize, and extract insights from your files. With role-based 
-            security and secure, local AI processing, you can eliminate 
-            manual searches and reclaim hours of productivity every single day.
-        </p>
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <p class="text-sm font-semibold text-gray-500">Average confidence today</p>
+            <p class="mt-2 text-3xl font-semibold text-gray-900"><span data-metric="avgConfidence">{{ metrics.avgConfidence }}</span>%</p>
+            <p class="mt-1 text-sm text-gray-500">The model's own estimate</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <p class="text-sm font-semibold text-gray-500">Average response time today</p>
+            <p class="mt-2 text-3xl font-semibold text-gray-900"><span data-metric="avgResponseTime">{{ metrics.avgResponseTime }}</span> s</p>
+            <p class="mt-1 text-sm text-gray-500">Document search plus answer</p>
+        </div>
     </div>
 
+    <div class="grid gap-6 xl:grid-cols-3">
+        <section class="xl:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 class="text-xl font-bold text-gray-900">AI queries per day</h2>
+                <p class="text-sm text-gray-500">Last 7 days · all users</p>
+            </div>
+            <div class="relative mt-4 h-64">
+                <canvas id="trendChart" role="img" aria-label="Line chart of AI queries per day for the last 7 days. The same numbers are in the table below."></canvas>
+            </div>
+            <details class="mt-4">
+                <summary class="cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-700">View as table</summary>
+                <table class="mt-3 w-full max-w-sm text-left text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-200 text-gray-500">
+                            <th class="py-2 font-semibold">Day</th>
+                            <th class="py-2 text-right font-semibold">AI queries</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trendTable" class="divide-y divide-gray-100 tabular-nums">
+                        {% for label in metrics.trendLabels %}
+                        <tr><td class="py-1.5 text-gray-700">{{ label }}</td><td class="py-1.5 text-right text-gray-900">{{ metrics.trendData[loop.index0] }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </details>
+        </section>
+
+        <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+            <h2 class="text-xl font-bold text-gray-900">Risk levels of AI answers</h2>
+            <p class="mt-1 text-sm text-gray-500">Last 7 days · as rated by the model</p>
+            <ul class="mt-6 space-y-5">
+                {% for level, color in risk_colors %}
+                {% set count = metrics.riskLevels.get(level, 0) %}
+                <li>
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="flex items-center gap-2 font-medium text-gray-700">
+                            <span class="h-2.5 w-2.5 rounded-full" style="background: {{ color }}"></span>{{ level }}
+                        </span>
+                        <span class="font-semibold text-gray-900" data-risk-count="{{ level }}">{{ count }}</span>
+                    </div>
+                    <div class="mt-2 h-2 rounded-full bg-gray-100">
+                        <div class="h-2 rounded-full transition-all" data-risk-bar="{{ level }}"
+                             style="width: {{ (100 * count / risk_total)|round|int if risk_total else 0 }}%; background: {{ color }}"></div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="mt-6 text-sm text-gray-500 {{ 'hidden' if risk_total }}" data-risk-empty>
+                No AI answers in the last 7 days yet. Ask a question in AI Studio to see how risky the matched policies are.
+            </p>
+        </section>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-3">
+        <section class="{{ 'xl:col-span-2' if session.get('role') == 'admin' else 'xl:col-span-3' }} bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+            <h2 class="text-xl font-bold text-gray-900">Documents by category</h2>
+            <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {% for item in metrics.documents %}
+                <a href="{{ url_for('folders', category=item.category) }}" class="group rounded-xl border border-gray-200 p-5 transition hover:border-indigo-300 hover:bg-indigo-50/40">
+                    <p class="text-sm font-semibold text-gray-500">{{ item.category|category_label }}</p>
+                    <p class="mt-2 text-3xl font-semibold text-gray-900" data-metric="count-{{ item.category }}">{{ item.count }}</p>
+                    <p class="mt-3 text-sm font-semibold text-indigo-600 group-hover:text-indigo-700">Open folder &rarr;</p>
+                </a>
+                {% else %}
+                <p class="text-sm text-gray-500">Your role doesn't have access to any document categories.</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        {% if session.get('role') == 'admin' %}
+        <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+            <div class="flex items-baseline justify-between">
+                <h2 class="text-xl font-bold text-gray-900">Recent activity</h2>
+                <a href="{{ url_for('admin_audit') }}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">View all</a>
+            </div>
+            <div class="mt-2">
+                {% with logs = recent_logs %}{% include "_activity.html" %}{% endwith %}
+            </div>
+        </section>
+        {% endif %}
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+    const ACCENT = '#4f46e5';       // indigo-600, the app's accent
+    const INK = '#374151';          // gray-700
+    const MUTED = '#6b7280';        // gray-500
+    const GRID = '#e5e7eb';         // gray-200
+    const RISK_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
+    const canvas = document.getElementById('trendChart');
+    let chart = null;
+
+    // A hairline under the hovered day, and today's value at the end of the line
+    const trendExtras = {
+        id: 'trendExtras',
+        beforeDatasetsDraw(chart) {
+            const active = chart.tooltip ? chart.tooltip.getActiveElements() : [];
+            if (!active.length) return;
+            const { ctx, chartArea } = chart;
+            ctx.save();
+            ctx.strokeStyle = '#d1d5db';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(active[0].element.x, chartArea.top);
+            ctx.lineTo(active[0].element.x, chartArea.bottom);
+            ctx.stroke();
+            ctx.restore();
+        },
+        afterDatasetsDraw(chart) {
+            const points = chart.getDatasetMeta(0).data;
+            if (!points.length) return;
+            const last = points[points.length - 1];
+            const value = chart.data.datasets[0].data[points.length - 1];
+            const { ctx } = chart;
+            ctx.save();
+            ctx.fillStyle = INK;
+            ctx.font = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(`${value} today`, last.x, last.y - 10);
+            ctx.restore();
+        },
+    };
+
+    function drawTrend(labels, data) {
+        if (!window.Chart || !canvas) return;  // CDN unavailable: the table view still has the numbers
+        if (chart) {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = data;
+            chart.update('none');
+            return;
+        }
+        chart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'AI queries',
+                    data: data,
+                    borderColor: ACCENT,
+                    backgroundColor: 'rgba(79, 70, 229, 0.10)',
+                    fill: true,
+                    borderWidth: 2,
+                    borderCapStyle: 'round',
+                    borderJoinStyle: 'round',
+                    cubicInterpolationMode: 'monotone',
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: ACCENT,
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointHitRadius: 12,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { top: 24, right: 6 } },
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        displayColors: false,
+                        backgroundColor: '#111827',
+                        padding: 10,
+                        titleFont: { size: 14, weight: '600' },
+                        callbacks: {
+                            title: (items) => `${items[0].parsed.y} ${items[0].parsed.y === 1 ? 'query' : 'queries'}`,
+                            label: (item) => item.label,
+                        },
+                    },
+                },
+                scales: {
+                    x: { grid: { display: false }, border: { color: '#d1d5db' }, ticks: { color: MUTED } },
+                    y: {
+                        beginAtZero: true,
+                        suggestedMax: 4,
+                        border: { display: false },
+                        grid: { color: GRID, lineWidth: 1 },
+                        ticks: { color: MUTED, precision: 0 },
+                    },
+                },
+            },
+            plugins: [trendExtras],
+        });
+    }
+
+    function setMetric(name, value) {
+        document.querySelectorAll(`[data-metric="${name}"]`).forEach((el) => { el.textContent = value; });
+    }
+
+    function fillTrendTable(labels, data) {
+        const body = document.getElementById('trendTable');
+        if (!body) return;
+        body.replaceChildren(...labels.map((label, i) => {
+            const row = document.createElement('tr');
+            const day = document.createElement('td');
+            const count = document.createElement('td');
+            day.className = 'py-1.5 text-gray-700';
+            count.className = 'py-1.5 text-right text-gray-900';
+            day.textContent = label;
+            count.textContent = data[i];
+            row.append(day, count);
+            return row;
+        }));
+    }
+
+    function showRisks(levels) {
+        const total = RISK_LEVELS.reduce((sum, level) => sum + (levels[level] || 0), 0);
+        RISK_LEVELS.forEach((level) => {
+            const count = levels[level] || 0;
+            document.querySelectorAll(`[data-risk-count="${level}"]`).forEach((el) => { el.textContent = count; });
+            document.querySelectorAll(`[data-risk-bar="${level}"]`).forEach((el) => {
+                el.style.width = `${total ? Math.round(100 * count / total) : 0}%`;
+            });
+        });
+        document.querySelectorAll('[data-risk-empty]').forEach((el) => el.classList.toggle('hidden', total > 0));
+    }
+
+    const initial = {{ metrics|tojson }};
+    drawTrend(initial.trendLabels, initial.trendData);
+
+    // Keep the numbers live (EGIP-style) while the page is open; the last numbers stay up if a refresh fails
+    async function refresh() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch('{{ url_for("dashboard_data") }}', { headers: { Accept: 'application/json' } });
+            if (!response.ok) return;
+            const metrics = await response.json();
+            ['totalDocuments', 'aiQueriesToday', 'avgConfidence', 'avgResponseTime'].forEach((name) => setMetric(name, metrics[name]));
+            metrics.documents.forEach((item) => setMetric(`count-${item.category}`, item.count));
+            showRisks(metrics.riskLevels);
+            drawTrend(metrics.trendLabels, metrics.trendData);
+            fillTrendTable(metrics.trendLabels, metrics.trendData);
+        } catch (error) {
+            console.warn('Dashboard refresh failed:', error);
+        }
+    }
+    setInterval(refresh, 15000);
+})();
+</script>
 {% endblock %}

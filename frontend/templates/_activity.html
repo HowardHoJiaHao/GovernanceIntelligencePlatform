@@ -1,0 +1,27 @@
+{# Recent audit records as a short feed. Expects `logs` (from the backend's /api/audit/logs). #}
+{% set verbs = {
+    'upload': 'uploaded',
+    'update': 'edited',
+    'delete': 'deleted',
+    'import': 'imported',
+    'ai_query': 'asked AI Studio',
+} %}
+<ul class="divide-y divide-gray-100">
+    {% for log in logs %}
+    <li class="py-3">
+        <p class="text-sm text-gray-800">
+            <span class="font-semibold text-gray-900">{{ log.actor }}</span>
+            {{ verbs.get(log.action, log.action|replace('_', ' ')) }}
+            {% if log.filename %}<span class="font-medium">{{ log.filename }}</span>{% endif %}
+            {% if log.action == 'ai_query' and log.details %}
+            <span class="text-gray-600">“{{ log.details.split(' | ')[0]|truncate(70) }}”</span>
+            {% endif %}
+        </p>
+        <p class="mt-0.5 text-xs text-gray-500">
+            {{ log.created_at|datetime }}{% if log.filename and log.category %} · {{ log.category|category_label }}{% endif %}
+        </p>
+    </li>
+    {% else %}
+    <li class="py-6 text-center text-sm text-gray-500">No activity recorded yet.</li>
+    {% endfor %}
+</ul>
