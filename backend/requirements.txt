@@ -3,5 +3,5 @@ flask-cors==4.0.0
 requests==2.31.0
 python-dotenv==1.0.0
 Werkzeug>=2.3.7
-chromadb>=0.5.13,<0.6
-ollama>=0.3.3
+chromadb==1.5.9
+ollama>=0.4

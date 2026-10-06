@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN uv venv && uv pip install -r requirements.txt
 
 # Copy frontend code
-COPY app.py .
+COPY app.py egip.html ./
 COPY templates/ ./templates/
 
 EXPOSE 5000

@@ -147,8 +147,10 @@
 </main>
 
 <script>
-  // API Configuration
-  const API_BASE_URL = 'http://localhost:5001/api';
+  // API Configuration: the backend container publishes port 5001 on the same host that serves this page
+  const API_BASE_URL = window.location.protocol.startsWith('http')
+    ? `${window.location.protocol}//${window.location.hostname}:5001/api`
+    : 'http://localhost:5001/api';
   
   // Hardcoded Repository Data (remains as is for Governance tab)
   const departmentDocs = {
@@ -184,11 +186,33 @@
     return date.toLocaleDateString('en-GB');
   }
 
-  function addAuditLog(user, action, module, details) {
+  // persist=false for actions the backend already audits itself (AI queries, uploads)
+  function addAuditLog(user, action, module, details, persist = true) {
     const newLog = { user, action, module, details, timestamp: new Date().toISOString() };
     auditLogs.unshift(newLog);
     if (auditLogs.length > 100) auditLogs.pop();
-    callAPI('/audit/log', 'POST', { user, action, module, details });
+    if (persist) callAPI('/audit/log', 'POST', { user, action, module, details });
+  }
+
+  async function fetchAuditLogs() {
+    const result = await callAPI('/audit/logs?limit=10');
+    if (Array.isArray(result)) {
+      auditLogs = result.map(log => ({
+        user: log.actor,
+        action: log.filename ? `${log.action}: ${log.filename}` : log.action,
+        module: log.category,
+        details: log.details,
+        // SQLite CURRENT_TIMESTAMP is UTC without a zone marker
+        timestamp: log.created_at ? log.created_at.replace(' ', 'T') + 'Z' : new Date().toISOString()
+      }));
+    }
+    return auditLogs;
+  }
+
+  function escapeHtmlText(text) {
+    const div = document.createElement('div');
+    div.textContent = text ?? '';
+    return div.innerHTML;
   }
 
   async function callAPI(endpoint, method = 'GET', body = null) {
@@ -247,7 +271,7 @@
       key_findings: "Service Unavailable",
       reasoning: "The local Ollama AI model is not responding. Please check if Ollama is installed and running.",
       risk_level: "Unknown",
-      recommendation: "Install Ollama from https://ollama.ai and run 'ollama pull llama2' then 'ollama serve'",
+      recommendation: "Install Ollama from https://ollama.com, run 'ollama pull gemma2:2b' and 'ollama pull nomic-embed-text', then 'ollama serve'",
       confidence: 0,
       sources: []
     };
@@ -358,6 +382,15 @@
   }
 
   async function renderGovernanceTab() {
+    // Real-time documents from backend for Governance
+    const governanceDocsList = backendDocuments.governance.map(doc =>
+      `<div class="document-item">
+        <i class="bi bi-file-text me-2"></i>
+        ${escapeHtmlText(doc.filename || doc.name)}
+        <small class="text-muted ms-2">${doc.updated_at ? doc.updated_at.slice(0,10) : ''}</small>
+      </div>`
+    ).join('');
+
     // Hardcoded Repository for Governance
     const hardcodedRepoHtml = Object.values(departmentDocs).map(dept => `
       <div class="dept-card">
@@ -374,9 +407,9 @@
           <div class="card-header-premium">Upload Governance Documents</div>
           <div class="upload-zone" id="govUploadZone">
             <i class="bi bi-cloud-upload fs-1"></i>
-            <p class="mt-2">Drag & drop or click to upload</p>
-            <small>PDF, DOCX, TXT</small>
-            <input type="file" id="govFileInput" style="display:none" accept=".pdf,.docx,.txt">
+            <p class="mt-2">Click to upload</p>
+            <small>TXT</small>
+            <input type="file" id="govFileInput" style="display:none" accept=".txt">
           </div>
           <div id="govStatus" class="upload-status text-success"></div>
         </div>
@@ -385,6 +418,9 @@
         <div class="premium-card">
           <div class="card-header-premium">Repository</div>
           <div class="scrollable-content">
+            <h6 class="small fw-bold mb-2">Governance Documents (${backendDocuments.governance.length})</h6>
+            ${governanceDocsList || '<div class="text-muted small mb-3">No documents uploaded yet</div>'}
+            <h6 class="small fw-bold mt-3 mb-2">Department Policy Library</h6>
             <div class="dept-grid">
               ${hardcodedRepoHtml}
             </div>
@@ -411,7 +447,7 @@
           <div class="upload-zone" id="compUploadZone">
             <i class="bi bi-cloud-upload fs-1"></i>
             <p class="mt-2">Upload policies, risk assessments</p>
-            <input type="file" id="compFileInput" style="display:none">
+            <input type="file" id="compFileInput" style="display:none" accept=".txt">
           </div>
           <div id="compStatus" class="upload-status text-success"></div>
         </div>
@@ -444,7 +480,7 @@
           <div class="upload-zone" id="procUploadZone">
             <i class="bi bi-cloud-upload fs-1"></i>
             <p class="mt-2">RFPs, contracts, evaluations</p>
-            <input type="file" id="procFileInput" style="display:none">
+            <input type="file" id="procFileInput" style="display:none" accept=".txt">
           </div>
           <div id="procStatus" class="upload-status text-success"></div>
         </div>
@@ -510,11 +546,12 @@
     `;
   }
 
-  function renderAdmin() {
+  async function renderAdmin() {
+    await Promise.all([fetchAuditLogs(), fetchAllDocuments()]);
     return `
       <div class="ai-columns">
         <div class="ai-panel"><h5><i class="bi bi-people me-2"></i>User Management</h5><button class="btn btn-primary btn-sm mb-3" id="addUserBtn">+ Add User</button><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Role</th><th>Action</th></tr></thead><tbody id="userTableBody">${users.map(u => `<tr><td>${u.name}</td><td>${u.role}</td><td><button class="btn btn-sm btn-outline-danger delete-user" data-id="${u.id}">Delete</button></td>`).join('')}</tbody></table></div></div>
-        <div class="ai-panel"><h5><i class="bi bi-journal-text me-2"></i>User Actions & Timestamp</h5><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Timestamp (DD/MM/YYYY)</th></tr></thead><tbody id="auditTableBody">${auditLogs.slice(0, 10).map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.module || '-'}</td><td>${formatDateDDMMYYYY(log.timestamp)}</td>`).join('')}</tbody></table></div></div>
+        <div class="ai-panel"><h5><i class="bi bi-journal-text me-2"></i>User Actions & Timestamp</h5><div class="table-responsive"><table class="data-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Timestamp (DD/MM/YYYY)</th></tr></thead><tbody id="auditTableBody">${auditLogs.slice(0, 10).map(log => `<tr><td>${escapeHtmlText(log.user)}</td><td>${escapeHtmlText(log.action)}</td><td>${escapeHtmlText(log.module || '-')}</td><td>${formatDateDDMMYYYY(log.timestamp)}</td>`).join('')}</tbody></table></div></div>
         <div class="ai-panel"><h5><i class="bi bi-database me-2"></i>Knowledge Management</h5><div><strong>Total Documents:</strong> <span id="totalDocsDisplay">${backendDocuments.governance.length + backendDocuments.compliance.length + backendDocuments.procurement.length}</span></div><div><strong>Last Upload:</strong> ${new Date().toLocaleDateString('en-GB')}</div></div>
         <div class="ai-panel"><h5><i class="bi bi-gear me-2"></i>System Configuration</h5><div><strong>AI Model:</strong> Ollama (Gemma2/Llama2)</div><div><strong>Backend:</strong> ${API_BASE_URL}</div><div><strong>Database:</strong> SQLite Connected</div></div>
       </div>
@@ -569,7 +606,7 @@
         document.getElementById("dynamicPage").innerHTML = html;
         setupAIAssistant();
       } else {
-        html = renderAdmin();
+        html = await renderAdmin();
         document.getElementById("dynamicPage").innerHTML = html;
         setupAdmin();
       }
@@ -695,7 +732,7 @@
       });
       
       renderMessages();
-      addAuditLog('user@egip.com', `AI Query: ${question.substring(0, 50)}`, 'AI Studio', `Confidence: ${dynamicConfidence}% | Response Time: ${dynamicResponseTime}s`);
+      addAuditLog('user@egip.com', `AI Query: ${question.substring(0, 50)}`, 'AI Studio', `Confidence: ${dynamicConfidence}% | Response Time: ${dynamicResponseTime}s`, false);
     }
     
     function renderMessages() {
@@ -770,91 +807,45 @@
     });
   }
 
+  async function uploadDocument(file, category, statusId, module) {
+    const status = document.getElementById(statusId);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category);
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/upload`, { method: 'POST', body: formData });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+      if (status) {
+        status.className = 'upload-status text-success';
+        status.innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${escapeHtmlText(file.name)}`;
+      }
+      // The backend writes the audit entry; record it locally only
+      addAuditLog("user@egip.com", `Uploaded: ${file.name}`, module, "", false);
+      setTimeout(() => { if (currentPage === "folder") loadPage("folder"); }, 1500);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      if (status) {
+        status.className = 'upload-status text-danger';
+        status.innerHTML = `<i class="bi bi-exclamation-circle"></i> Upload failed: ${escapeHtmlText(error.message)}`;
+      }
+    }
+  }
+
   function attachUploadEvents() {
-    // Governance Upload
-    const govZone = document.getElementById("govUploadZone");
-    if (govZone) {
-      govZone.onclick = () => document.getElementById("govFileInput")?.click();
-      document.getElementById("govFileInput")?.addEventListener("change", async (e) => {
-        if (e.target.files[0]) {
-          // Call backend to save document
-          const formData = new FormData();
-          formData.append('file', e.target.files[0]);
-          formData.append('category', 'governance');
-          
-          try {
-            await fetch(`${API_BASE_URL}/documents/upload`, {
-              method: 'POST',
-              body: formData
-            });
-            document.getElementById("govStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
-            setTimeout(() => { document.getElementById("govStatus").innerHTML = ""; }, 3000);
-            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Governance", "");
-            // Refresh folder view
-            if (currentPage === "folder") {
-              loadPage("folder");
-            }
-          } catch (error) {
-            console.error('Upload failed:', error);
-            document.getElementById("govStatus").innerHTML = `<i class="bi bi-exclamation-circle"></i> Upload failed`;
-          }
-        }
-      });
-    }
-    
-    // Compliance Upload
-    const compZone = document.getElementById("compUploadZone");
-    if (compZone) {
-      compZone.onclick = () => document.getElementById("compFileInput")?.click();
-      document.getElementById("compFileInput")?.addEventListener("change", async (e) => {
-        if (e.target.files[0]) {
-          const formData = new FormData();
-          formData.append('file', e.target.files[0]);
-          formData.append('category', 'compliance');
-          
-          try {
-            await fetch(`${API_BASE_URL}/documents/upload`, {
-              method: 'POST',
-              body: formData
-            });
-            document.getElementById("compStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
-            setTimeout(() => { document.getElementById("compStatus").innerHTML = ""; }, 3000);
-            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Compliance", "");
-            if (currentPage === "folder") {
-              loadPage("folder");
-            }
-          } catch (error) {
-            console.error('Upload failed:', error);
-          }
-        }
-      });
-    }
-    
-    // Procurement Upload
-    const procZone = document.getElementById("procUploadZone");
-    if (procZone) {
-      procZone.onclick = () => document.getElementById("procFileInput")?.click();
-      document.getElementById("procFileInput")?.addEventListener("change", async (e) => {
-        if (e.target.files[0]) {
-          const formData = new FormData();
-          formData.append('file', e.target.files[0]);
-          formData.append('category', 'procurement');
-          
-          try {
-            await fetch(`${API_BASE_URL}/documents/upload`, {
-              method: 'POST',
-              body: formData
-            });
-            document.getElementById("procStatus").innerHTML = `<i class="bi bi-check-circle"></i> Uploaded: ${e.target.files[0].name}`;
-            setTimeout(() => { document.getElementById("procStatus").innerHTML = ""; }, 3000);
-            addAuditLog("user@egip.com", `Uploaded: ${e.target.files[0].name}`, "Procurement", "");
-            if (currentPage === "folder") {
-              loadPage("folder");
-            }
-          } catch (error) {
-            console.error('Upload failed:', error);
-          }
-        }
+    const uploadTargets = [
+      { zone: "govUploadZone", input: "govFileInput", status: "govStatus", category: "governance", module: "Governance" },
+      { zone: "compUploadZone", input: "compFileInput", status: "compStatus", category: "compliance", module: "Compliance" },
+      { zone: "procUploadZone", input: "procFileInput", status: "procStatus", category: "procurement", module: "Procurement" },
+    ];
+    for (const target of uploadTargets) {
+      const zone = document.getElementById(target.zone);
+      const input = document.getElementById(target.input);
+      if (!zone || !input) continue;
+      zone.onclick = () => input.click();
+      input.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) uploadDocument(file, target.category, target.status, target.module);
       });
     }
   }

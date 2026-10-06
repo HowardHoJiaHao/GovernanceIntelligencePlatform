@@ -2,12 +2,14 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import threading
 from database_logic import (
     authenticate_user,
     bootstrap_database,
     delete_document_by_id,
     get_document_by_id,
     get_documents,
+    get_documents_by_category,
     list_audit_logs,
     get_access_label,
     log_audit,
@@ -16,12 +18,19 @@ from database_logic import (
     get_allowed_categories,
     call_local_model,
     get_relevant_context,
+    answer_question,
+    get_dashboard_metrics,
+    sync_vector_index,
+    OLLAMA_HOST,
 )
 
 app = Flask(__name__)
 CORS(app)
 
 BACKEND_PORT = int(os.environ.get('BACKEND_PORT', 5001))
+
+# egip.html files its uploads under "governance"; the database calls that category "document"
+EGIP_CATEGORY_ALIASES = {'governance': 'document'}
 
 # ============ BOOTSTRAP ON STARTUP ============
 # This runs when the module loads, BEFORE the main block
@@ -33,6 +42,16 @@ with app.app_context():
         print("✅ Database bootstrap complete")
     except Exception as e:
         print(f"⚠️ Bootstrap warning: {e}")
+
+def _sync_vectors_in_background():
+    """Embed any documents missing from ChromaDB without blocking startup."""
+    try:
+        result = sync_vector_index()
+        print(f"✅ Vector index sync: {result}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Vector index sync skipped (is Ollama running at {OLLAMA_HOST}?): {e}", flush=True)
+
+threading.Thread(target=_sync_vectors_in_background, daemon=True).start()
 
 # ============ API ENDPOINTS ============
 @app.route('/api/health', methods=['GET'])
@@ -163,17 +182,24 @@ def api_generate():
 
 @app.route('/api/RAG', methods=['POST'])
 def generate():
-    # FIX: Use get_json()
-    data = request.get_json()
+    data = request.get_json() or {}
     query = data.get('prompt')
-    
+    if not query:
+        return jsonify({"error": "Prompt is required"}), 400
+
     try:
         # Get context and add a safety check
         context = get_relevant_context(query)
         if not context:
             context = "No relevant information found in the database."
 
-        prompt = f"..." 
+        prompt = (
+            "You are a helpful assistant. Use only the provided context to answer the question. "
+            "Cite the source filenames provided in the context. "
+            "If the answer is not in the context, say so clearly.\n\n"
+            f"Context:\n{context}\n"
+            f"Question: {query}"
+        )
 
         result = call_local_model(prompt)
         return jsonify({"model_answer": result}), 200
@@ -245,6 +271,93 @@ def run_bootstrap():
     except Exception as e:
         return jsonify({'success': False, 'message': f'Bootstrap failed: {str(e)}'}), 500
 
+@app.route('/api/reindex', methods=['POST'])
+def api_reindex():
+    """Re-embed every document into ChromaDB (needs Ollama + the embedding model)."""
+    try:
+        result = sync_vector_index(force=True)
+        return jsonify({'success': True, **result}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============ EGIP DASHBOARD (frontend/egip.html) ============
+@app.route('/api/documents', methods=['GET'])
+def api_list_all_documents():
+    documents = [dict(doc) for doc in get_documents_by_category()]
+    return jsonify({"success": True, "documents": documents}), 200
+
+@app.route('/api/documents/upload', methods=['POST'])
+def api_upload_document():
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    if not file.filename.lower().endswith('.txt'):
+        return jsonify({'success': False, 'error': 'Only .txt files are supported'}), 400
+
+    category = (request.form.get('category') or '').strip().lower()
+    category = EGIP_CATEGORY_ALIASES.get(category, category)
+    if not category:
+        return jsonify({'success': False, 'error': 'Category is required'}), 400
+
+    content = file.read().decode('utf-8', errors='ignore').strip()
+    if not content:
+        return jsonify({'success': False, 'error': 'File is empty'}), 400
+
+    try:
+        file_path = save_text_document(
+            category=category,
+            filename=file.filename,
+            content=content,
+            actor=request.form.get('actor') or 'egip',
+            action='upload',
+        )
+        return jsonify({'success': True, 'file_path': file_path}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard/metrics', methods=['GET'])
+def api_dashboard_metrics():
+    try:
+        return jsonify(get_dashboard_metrics()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai/query', methods=['POST'])
+def api_ai_query():
+    data = request.get_json() or {}
+    question = (data.get('question') or '').strip()
+    if not question:
+        return jsonify({'error': 'Question is required'}), 400
+
+    # With a role, only that role's categories are searched (the AI Chatbot page sends one).
+    # The admin-only EGIP dashboard sends no role, so it searches every category.
+    role = data.get('role')
+    categories = get_allowed_categories(role) if role else None
+
+    try:
+        result = answer_question(question, categories=categories)
+    except Exception as e:
+        print(f"DEBUG: AI query failed: {e}", flush=True)
+        return jsonify({'error': f'AI model unavailable: {e}'}), 503
+
+    log_audit(
+        data.get('user') or 'egip', 'ai_query', category=data.get('module') or 'AI Studio',
+        details=f"{question[:120]} | confidence {result['confidence']}% | {result['response_time']}s",
+    )
+    return jsonify(result), 200
+
+@app.route('/api/audit/log', methods=['POST'])
+def api_add_audit_log():
+    data = request.get_json() or {}
+    action = (data.get('action') or '').strip()
+    if not action:
+        return jsonify({'success': False, 'error': 'Action is required'}), 400
+    log_audit(
+        data.get('user') or 'egip', action,
+        category=data.get('module'), details=data.get('details'),
+    )
+    return jsonify({'success': True}), 200
+
 # ============ MAIN BLOCK - SERVER STARTS HERE ============
 if __name__ == '__main__':
     print("=" * 50)
@@ -256,15 +369,22 @@ if __name__ == '__main__':
     print("📋 Available endpoints:")
     print("  POST   /api/login")
     print("  GET    /api/health")
+    print("  GET    /api/documents")
     print("  GET    /api/documents/<role>")
     print("  GET    /api/document/<id>")
     print("  POST   /api/documents")
+    print("  POST   /api/documents/upload")
     print("  POST   /api/delete-document")
     print("  GET    /api/categories/<role>")
     print("  GET    /api/access-label/<role>")
     print("  POST   /api/generate")
+    print("  POST   /api/RAG")
+    print("  POST   /api/ai/query")
+    print("  GET    /api/dashboard/metrics")
     print("  GET    /api/audit/logs")
+    print("  POST   /api/audit/log")
     print("  POST   /api/bootstrap/run")
+    print("  POST   /api/reindex")
     print("=" * 50)
     
     # Start the Flask development server

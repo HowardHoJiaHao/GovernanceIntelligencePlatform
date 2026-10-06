@@ -1,21 +1,40 @@
 import sqlite3
 import os
+import math
+import re
+import time
 from datetime import datetime
 import json
 import urllib.request
 import urllib.error
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
 import chromadb
 from chromadb.utils import embedding_functions
 
+# Load .env for local (non-Docker) runs; Docker passes variables via env_file
+load_dotenv()
 
-client = chromadb.PersistentClient(path="/app/chroma_db")
+# Defaults live in the project root (/app inside Docker, the repo folder locally).
+# Empty values (e.g. "DB_PATH=" in .env) fall back to the defaults too.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.getenv('DB_PATH') or os.path.join(PROJECT_ROOT, 'database.db')
+DATA_ROOT = os.getenv('DATA_ROOT') or os.path.join(PROJECT_ROOT, 'data')
+CHROMA_PATH = os.getenv('CHROMA_PATH') or os.path.join(PROJECT_ROOT, 'chroma_db')
+
+# Base URL of the Ollama server (docker-compose points this at host.docker.internal)
+OLLAMA_HOST = (os.getenv('OLLAMA_HOST') or 'http://localhost:11434').rstrip('/')
+OLLAMA_URL = os.getenv('OLLAMA_URL') or f'{OLLAMA_HOST}/api/generate'
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL') or 'gemma2:2b'
+OLLAMA_EMBED_MODEL = os.getenv('OLLAMA_EMBED_MODEL') or 'nomic-embed-text'
+
+client = chromadb.PersistentClient(path=CHROMA_PATH)
 
 # Use Ollama to generate embeddings automatically
 ollama_ef = embedding_functions.OllamaEmbeddingFunction(
-    # CHANGE THIS: Point to the embeddings endpoint
-    url="http://host.docker.internal:11434/api/embeddings", 
-    model_name="nomic-embed-text" 
+    url=OLLAMA_HOST,
+    model_name=OLLAMA_EMBED_MODEL,
+    timeout=300,  # first call loads the model, which can exceed the 60s default on CPU-only machines
 )
 
 # Get or create your collection
@@ -30,46 +49,32 @@ ROLE_ACCESS = {
 ROLE_LABELS = {
     'admin': 'All categories',
     'reporter': 'Procurement and compliance',
-    'user': 'Procurement only',
+    'user': 'Governance documents only',
 }
 
-OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://host.docker.internal:11434/api/generate')
-
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma2:2b')
-
-DB_PATH = os.getenv('DB_PATH', '/app/database.db')
-DATA_ROOT = os.getenv('DATA_ROOT', '/app/data')
-
 def get_db_connection():
-    # 1. Debugging check
-    print(f"DEBUG: Checking file at {DB_PATH}", flush=True)
-    
-    if os.path.exists(DB_PATH):
-        # Perform the "Sanity Check"
-        temp_conn = sqlite3.connect(DB_PATH, timeout=30)
-        count = temp_conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        print(f"DEBUG: Database file exists. Document count in THIS file is: {count}", flush=True)
-        temp_conn.close()
-    else:
-        print(f"ERROR: Database file NOT FOUND at {DB_PATH}", flush=True)
-
-    # 2. Actual connection logic
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
 def ensure_schema():
+    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         '''CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
             category TEXT NOT NULL,
             content TEXT NOT NULL,
+            upload_date TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )'''
     )
+    # Databases created by older versions lack upload_date
+    columns = {row['name'] for row in cursor.execute('PRAGMA table_info(documents)')}
+    if 'upload_date' not in columns:
+        cursor.execute('ALTER TABLE documents ADD COLUMN upload_date TEXT')
     cursor.execute(
         '''CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY,
@@ -197,6 +202,11 @@ def delete_document_by_id(document_id):
     conn.execute('DELETE FROM documents WHERE id = ?', (document_id,))
     conn.commit()
     conn.close()
+
+    try:
+        collection.delete(ids=[str(document['id'])])
+    except Exception as e:
+        print(f"⚠️ Vector DB warning: could not remove document {document['id']}: {e}", flush=True)
     return document
 
 def create_category(category_name):
@@ -205,8 +215,6 @@ def create_category(category_name):
         return None
     os.makedirs(os.path.join(DATA_ROOT, safe_category), exist_ok=True)
     return safe_category
-
-import re
 
 def sanitize_text(text):
     if not isinstance(text, str):
@@ -258,7 +266,7 @@ def save_text_document(category, filename, content, actor, action,
         
         if row:
             doc_id = row['id']
-            cursor.execute('UPDATE documents SET content = ?, category = ?, filename = ? WHERE id = ?', 
+            cursor.execute('UPDATE documents SET content = ?, category = ?, filename = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                            (content, category, filename, doc_id))
         else:
             today = datetime.now().strftime('%Y-%m-%d')
@@ -269,61 +277,64 @@ def save_text_document(category, filename, content, actor, action,
             doc_id = cursor.lastrowid
         
         conn.commit()
-        
-        # try:
-        # # 5. RAG Sync: Upsert only the changed document
-        #     safe_content = str(content).strip() if content else ""
-        
-        #     if len(safe_content) > 0:
-        #         print(f"DEBUG: Upserting content of length {len(safe_content)} to Vector DB.")
-        #         collection.upsert(
-        #             ids=[str(doc_id)],
-        #             documents=[safe_content],
-        #             metadatas=[{"category": category, "filename": filename}]
-        #         )
-        #     else:
-        #         print(f"❌ RAG ERROR: Content for {filename} (ID: {doc_id}) is empty! Vector sync aborted.")
-        # except Exception as e:
-        #     import traceback
-        #     print(f"❌ CRITICAL ERROR: {traceback.format_exc()}")
-        #     raise
-        try:
-            # First, check if the embedding function will actually accept this
-            # We perform a dummy check or simply wrap the upsert in a try-except block
-            clean_content = sanitize_text(content)
-
-            # LOG the difference
-            print(f"DEBUG: Original length: {len(content)}, Cleaned length: {len(clean_content)}")
-            collection.upsert(
-                ids=[str(doc_id)],
-                documents=[clean_content],
-                metadatas=[{"category": category, "filename": filename}]
-            )
-            print(f"✅ Successfully upserted {filename} to Vector DB.")
-        except ValueError as ve:
-            print(f"⚠️ Vector DB warning: Failed to embed document {filename}. Error: {ve}")
     finally:
         conn.close()
 
+    # 5. RAG Sync: the document is already saved, so a vector failure
+    # (e.g. Ollama not running) must not turn the upload into an error.
+    # Missing vectors are filled in later by sync_vector_index().
+    index_document(doc_id, category, filename, content)
+
     # 6. Audit
     log_audit(actor=actor, action=action, category=category, filename=filename, details="Updated via API")
+    return file_path
 
+def index_document(doc_id, category, filename, content):
+    """Upsert one document into the vector DB. Returns True on success."""
+    clean_content = sanitize_text(content)
+    if not clean_content:
+        print(f"⚠️ Vector DB warning: {filename} is empty, skipping embedding.", flush=True)
+        return False
+    try:
+        collection.upsert(
+            ids=[str(doc_id)],
+            documents=[clean_content],
+            metadatas=[{"category": category, "filename": filename}]
+        )
+        print(f"✅ Successfully upserted {filename} to Vector DB.", flush=True)
+        return True
+    except Exception as e:
+        print(f"⚠️ Vector DB warning: Failed to embed document {filename}. Error: {e}", flush=True)
+        return False
 
+def sync_vector_index(force=False):
+    """Embed SQLite documents that are missing from the vector DB (all of them if force=True)."""
+    documents = get_documents_by_category()
+    if force:
+        missing = documents
+    else:
+        existing = set(collection.get(ids=[str(doc['id']) for doc in documents], include=[])['ids']) if documents else set()
+        missing = [doc for doc in documents if str(doc['id']) not in existing]
 
+    indexed = sum(
+        index_document(doc['id'], doc['category'], doc['filename'], doc['content'])
+        for doc in missing
+    )
+    return {'total': len(documents), 'checked': len(missing), 'indexed': indexed}
 
 def bootstrap_database():
     ensure_schema()
-    # seed_default_users()
-    # ingest_data()
-    # get_allowed_categories(current_username())
 
-def call_local_model(prompt):
+def call_local_model(prompt, response_format=None):
     try:
-        payload = json.dumps({
+        body = {
             'model': OLLAMA_MODEL,
             'prompt': prompt,
             'stream': False,
-        }).encode('utf-8')
+        }
+        if response_format:
+            body['format'] = response_format
+        payload = json.dumps(body).encode('utf-8')
 
         request = urllib.request.Request(
             OLLAMA_URL, # Ensure this is http://ollama:11434/api/generate
@@ -343,26 +354,190 @@ def call_local_model(prompt):
         print(f"CRITICAL: Unexpected error in call_local_model: {str(e)}", flush=True)
         raise e
 
-def get_relevant_context(user_query, n_results=3):
-    # Query ChromaDB
-    results = collection.query(
-        query_texts=[user_query],
-        n_results=n_results
-    )
-    
-    # 1. Safety Check: Ensure results exist and contain data
-    if not results['documents'] or not results['documents'][0]:
-        return "No relevant information found."
+def _cosine_similarity(a, b):
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return dot / norm if norm else 0.0
 
-    # 2. Combine the results safely
-    context_text = ""
-    # We use zip() here to make the loop much cleaner and more "Pythonic"
-    documents = results['documents'][0]
-    metadatas = results['metadatas'][0]
-    
-    for doc, meta in zip(documents, metadatas):
-        # Handle cases where metadata might be None
-        filename = meta.get('filename', 'Unknown Source') if meta else 'Unknown Source'
-        context_text += f"Source: {filename}\nContent: {doc}\n\n"
-        
-    return context_text
+def _keyword_search(user_query, n_results, categories=None):
+    """Fallback when the vector DB is empty or Ollama embeddings are unavailable."""
+    terms = {t for t in re.findall(r'[a-z0-9]+', user_query.lower()) if len(t) > 2}
+    scored = []
+    for doc in get_documents_by_category():
+        if categories is not None and doc['category'] not in categories:
+            continue
+        haystack = f"{doc['filename']} {doc['category']} {doc['content']}".lower()
+        hits = sum(1 for t in terms if t in haystack)
+        if hits:
+            scored.append((hits, doc))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {
+            'filename': doc['filename'],
+            'category': doc['category'],
+            'content': doc['content'],
+            'relevance': round(100 * hits / len(terms)),
+        }
+        for hits, doc in scored[:n_results]
+    ]
+
+def search_documents(user_query, n_results=3, categories=None):
+    """Return the most relevant documents as dicts with a 0-100 relevance score.
+
+    categories limits the search to those categories; None searches all of them.
+    """
+    if categories is not None and not categories:
+        return []
+    try:
+        if collection.count() == 0:
+            raise LookupError('vector DB is empty')
+        query_embedding = ollama_ef([user_query])[0]
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            where={'category': {'$in': list(categories)}} if categories is not None else None,
+            include=['documents', 'metadatas', 'embeddings'],
+        )
+        matches = []
+        for doc, meta, emb in zip(results['documents'][0], results['metadatas'][0], results['embeddings'][0]):
+            meta = meta or {}
+            matches.append({
+                'filename': meta.get('filename', 'Unknown Source'),
+                'category': meta.get('category', ''),
+                'content': doc,
+                'relevance': max(0, round(100 * _cosine_similarity(query_embedding, emb))),
+            })
+        return matches
+    except Exception as e:
+        print(f"⚠️ Vector search unavailable ({e}); using keyword search.", flush=True)
+        return _keyword_search(user_query, n_results, categories)
+
+def get_relevant_context(user_query, n_results=3):
+    matches = search_documents(user_query, n_results)
+    if not matches:
+        return "No relevant information found."
+    return ''.join(f"Source: {m['filename']}\nContent: {m['content']}\n\n" for m in matches)
+
+def _excerpt(content, query, length=160):
+    """The part of a document around the first query word it contains."""
+    lowered = content.lower()
+    for term in re.findall(r'[a-z0-9]+', query.lower()):
+        index = lowered.find(term) if len(term) > 2 else -1
+        if index != -1:
+            return content[max(index - 60, 0):index + length].strip()
+    return content[:length].strip()
+
+def answer_question(question, n_results=4, categories=None):
+    """RAG answer in the structured shape the EGIP dashboard and the AI Chatbot page render.
+
+    categories limits the search to those categories; None searches all of them.
+    """
+    started = time.time()
+    matches = search_documents(question, n_results, categories)
+    if not matches:
+        # Nothing to ground an answer on, so don't let the model guess
+        return {
+            'answer': 'No matching documents were found for your allowed categories.',
+            'key_findings': '',
+            'reasoning': '',
+            'risk_level': 'Low',
+            'recommendation': '',
+            'confidence': 0,
+            'sources': [],
+            'response_time': round(time.time() - started, 2),
+        }
+
+    context = ''.join(
+        f"Source: {m['filename']} (category: {m['category']})\nContent: {m['content'][:2000]}\n\n"
+        for m in matches
+    ) or "No relevant information found."
+
+    prompt = (
+        "You are a governance, compliance and procurement analyst. Answer the question using ONLY "
+        "the context below. If the context does not contain the answer, say so.\n"
+        "Respond with a JSON object with exactly these keys:\n"
+        '  "answer": short direct answer,\n'
+        '  "key_findings": the key facts from the context,\n'
+        '  "reasoning": how the context supports the answer,\n'
+        '  "risk_level": one of "Low", "Medium", "High", "Critical",\n'
+        '  "recommendation": recommended next step,\n'
+        '  "confidence": integer 0-100.\n\n'
+        f"Context:\n{context}\nQuestion: {question}"
+    )
+    raw = call_local_model(prompt, response_format='json')
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        parsed = {'answer': raw}
+
+    def text(key, default=''):
+        value = parsed.get(key, default)
+        if isinstance(value, list):
+            # The model often returns key findings as a list; show it as bullet lines
+            return '\n'.join(f"- {item if isinstance(item, str) else json.dumps(item)}" for item in value)
+        return value if isinstance(value, str) else json.dumps(value)
+
+    try:
+        confidence = max(0, min(100, int(float(parsed.get('confidence', 0)))))
+    except (TypeError, ValueError):
+        confidence = 0
+    risk_level = text('risk_level', 'Low').capitalize()
+    if risk_level not in ('Low', 'Medium', 'High', 'Critical'):
+        risk_level = 'Low'
+
+    return {
+        'answer': text('answer'),
+        'key_findings': text('key_findings'),
+        'reasoning': text('reasoning'),
+        'risk_level': risk_level,
+        'recommendation': text('recommendation'),
+        'confidence': confidence,
+        'sources': [
+            {
+                'title': m['filename'],
+                'category': m['category'],
+                'relevance': m['relevance'],
+                'excerpt': _excerpt(m['content'], question),
+            }
+            for m in matches
+        ],
+        'response_time': round(time.time() - started, 2),
+    }
+
+AI_QUERY_DETAILS = re.compile(r'confidence (\d+)% \| ([\d.]+)s$')
+
+def get_dashboard_metrics():
+    """Real counts for the EGIP dashboard. Fields without a data source are left out."""
+    conn = get_db_connection()
+    try:
+        counts = {row['category']: row['count'] for row in conn.execute(
+            'SELECT category, COUNT(*) AS count FROM documents GROUP BY category')}
+        today_queries = conn.execute(
+            "SELECT details FROM audit_logs WHERE action = 'ai_query' AND date(created_at) = date('now')"
+        ).fetchall()
+        trend_rows = {row['day']: row['count'] for row in conn.execute(
+            "SELECT date(created_at) AS day, COUNT(*) AS count FROM audit_logs "
+            "WHERE action = 'ai_query' AND date(created_at) >= date('now', '-6 days') GROUP BY day")}
+        trend_days = [row[0] for row in conn.execute(
+            "SELECT date('now', '-' || n || ' days') FROM "
+            "(SELECT 6 AS n UNION SELECT 5 UNION SELECT 4 UNION SELECT 3 UNION SELECT 2 UNION SELECT 1 UNION SELECT 0) ORDER BY n DESC")]
+    finally:
+        conn.close()
+
+    stats = [AI_QUERY_DETAILS.search(row['details'] or '') for row in today_queries]
+    stats = [(int(m.group(1)), float(m.group(2))) for m in stats if m]
+
+    compliance = counts.pop('compliance', 0)
+    procurement = counts.pop('procurement', 0)
+    return {
+        'governanceDocs': sum(counts.values()),  # 'document' and any custom categories
+        'complianceDocs': compliance,
+        'procurementDocs': procurement,
+        'aiQueriesToday': len(today_queries),
+        'avgConfidence': round(sum(c for c, _ in stats) / len(stats)) if stats else 0,
+        'avgResponseTime': round(sum(t for _, t in stats) / len(stats), 1) if stats else 0,
+        'trendLabels': [datetime.strptime(day, '%Y-%m-%d').strftime('%a') for day in trend_days],
+        'trendData': [trend_rows.get(day, 0) for day in trend_days],
+    }

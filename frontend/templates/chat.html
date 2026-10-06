@@ -25,39 +25,62 @@
         <button class="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">Ask Gemma</button>
     </form>
 
-    {% if answer %}
+    {% if answer and answer.error %}
+    <div class="mt-10 p-6 bg-red-50 border border-red-200 rounded-xl text-red-800">
+        <h4 class="font-bold mb-2 text-lg">Gemma could not answer</h4>
+        <p class="text-sm">{{ answer.error }}</p>
+    </div>
+    {% elif answer %}
+    {% set risk_colors = {
+        'Low': 'bg-emerald-100 text-emerald-800',
+        'Medium': 'bg-yellow-100 text-yellow-800',
+        'High': 'bg-orange-100 text-orange-800',
+        'Critical': 'bg-red-100 text-red-800',
+    } %}
     <div class="mt-10 space-y-6">
         <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">Findings Summary</h4>
-            <p class="text-gray-700 whitespace-pre-line">{{ answer.summary }}</p>
+            <h4 class="font-bold text-gray-900 mb-3 text-lg">Answer</h4>
+            <p class="text-gray-700 whitespace-pre-line">{{ answer.answer }}</p>
         </div>
 
+        <div class="grid gap-6 sm:grid-cols-2">
+            <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h4 class="font-bold text-gray-900 mb-3 text-lg">Risk Level</h4>
+                <span class="inline-block px-3 py-1 rounded-full text-sm font-semibold {{ risk_colors.get(answer.risk_level, risk_colors['Low']) }}">{{ answer.risk_level }}</span>
+            </div>
+            <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
+                <h4 class="font-bold text-gray-900 mb-3 text-lg">Confidence</h4>
+                <div class="h-2 rounded-full bg-gray-200">
+                    <div class="h-2 rounded-full bg-indigo-600" style="width: {{ answer.confidence|int }}%"></div>
+                </div>
+                <p class="text-sm text-gray-600 mt-2">{{ answer.confidence|int }}% (Gemma's own estimate) &middot; answered in {{ answer.response_time }}s</p>
+            </div>
+        </div>
+
+        {% for title, value in [('Key Findings', answer.key_findings), ('Reasoning', answer.reasoning), ('Recommendation', answer.recommendation)] if value %}
         <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">Gemma Response</h4>
-            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
-                {{ answer.answer }}
-            </div>
+            <h4 class="font-bold text-gray-900 mb-3 text-lg">{{ title }}</h4>
+            <p class="text-gray-700 whitespace-pre-line">{{ value }}</p>
         </div>
+        {% endfor %}
 
-        <!-- <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
-            <h4 class="font-bold text-gray-900 mb-3 text-lg">RAG Response</h4>
-            <div class="prose max-w-none text-gray-700 whitespace-pre-line">
-                {{ answer.RAG_answer }}
-            </div>
-        </div> -->
-
+        {% if answer.sources %}
         <div class="p-6 bg-white border border-gray-200 rounded-xl shadow-sm">
             <h4 class="font-bold text-gray-900 mb-3 text-lg">Matched Documents</h4>
             <div class="space-y-4">
                 {% for source in answer.sources %}
                 <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <p class="font-semibold text-gray-900">{{ source.filename }}</p>
+                    <div class="flex items-start justify-between gap-3">
+                        <p class="font-semibold text-gray-900">{{ source.title }}</p>
+                        <span class="shrink-0 rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">{{ source.relevance }}% relevance</span>
+                    </div>
                     <p class="text-sm text-gray-600 mb-2">Category: {{ source.category|title }}</p>
                     <p class="text-sm text-gray-700">{{ source.excerpt }}</p>
                 </div>
                 {% endfor %}
             </div>
         </div>
+        {% endif %}
     </div>
     {% endif %}
 </div>

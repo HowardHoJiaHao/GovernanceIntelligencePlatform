@@ -6,28 +6,36 @@ services:
     # This ensures Docker runs your code from inside the 'backend' folder
     working_dir: /app/backend
     volumes:
-      # Map root to /app so both DB and 'backend' folder are visible
+      # Map root to /app so the database, data/ and backend/ are all visible
       - .:/app
       - chroma_data:/app/chroma_db
     environment:
-      - DB_PATH=${DB_PATH}
-      - DATA_ROOT=${DATA_ROOT}
+      # Container paths: these override any values in .env
+      - DB_PATH=/app/database.db
+      - DATA_ROOT=/app/data
+      - CHROMA_PATH=/app/chroma_db
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - BACKEND_PORT=5001
+      - PYTHONUNBUFFERED=1
+    # 127.0.0.1 only: the API has no authentication, so keep it off your network
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5001:5001"
     networks:
       - app-network
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
-      
+    # Lets the container reach Ollama running on the host (needed on Linux; harmless on Docker Desktop)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   frontend:
     build: ./frontend
     container_name: frontend
     env_file: .env  # This tells Docker to load your .env file
+    # 127.0.0.1 only: Flask runs in debug mode, so don't expose it to other machines
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     environment:
       - BACKEND_URL=http://backend:5001
+      - PYTHONUNBUFFERED=1
     depends_on:
       - backend
     networks:
